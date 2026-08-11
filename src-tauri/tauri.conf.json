@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "productName": "Hwp-to-MD_Converter_v2.0",
-  "version": "2.0.0",
+  "productName": "Hwp-to-MD_Converter_v1.0",
+  "version": "1.0.0",
   "identifier": "com.kodoc.mdpdfparcel",
   "build": {
     "beforeDevCommand": "npm run dev",

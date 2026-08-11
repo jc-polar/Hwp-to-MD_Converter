@@ -327,7 +327,7 @@ async function startConversion() {
     }
 }
 
-const CURRENT_VERSION = 'v2.0';
+const CURRENT_VERSION = 'v1.0';
 
 function compareVersions(v1, v2) {
     const clean1 = (v1 || '').replace(/^v/i, '').split('.').map(Number);

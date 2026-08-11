@@ -1,10 +1,17 @@
 <div align="center">
-  <h1>🚀 Hwp-to-MD_Converter v2.0 (MD / PDF 통합 변환기)</h1>
+  <h1>🚀 Hwp-to-MD_Converter v1.0 (MD / PDF 통합 변환기)</h1>
   <p><strong>문서를 MD / PDF 로 변환하는 데스크톱 애플리케이션</strong></p>
-  <p><em>(MD_converter 프로젝트의 정식 후속 버전)</em></p>
+  <p><em>(Tauri v2 기반 포터블 데스크톱 버전)</em></p>
 </div>
 
 <br>
+
+### 📥 바로 실행하기 (Download Portable)
+
+별도의 복잡한 설치 과정 없이 다운로드 후 즉시 실행 가능한 포터블 단독 실행 파일입니다.
+👉 **[최신 버전 실행 파일 다운로드 (Releases)](https://github.com/jc-polar/Hwp-to-MD_Converter/releases/latest)**
+
+---
 
 ### 🛡️ Windows PC 보호(SmartScreen) 창이 뜰 경우
 
@@ -19,12 +26,12 @@
 
 이 애플리케이션은 오픈소스 파싱 라이브러리인 [`kordoc`](https://github.com/chrisryugj/kordoc) 엔진과 한컴 OLE 자동화 제어 기법을 결합하여, 문서의 서식과 수치 정합성을 보존하며 마크다운(MD) 및 PDF로 변환합니다.
 
-- **📄 폭넓은 문서 포맷 지원**: HWP, HWPX를 비롯해 PDF, Word, Excel 등 실무에서 자주 쓰이는 다양한 문서를 지원합니다.
+- **🇰🇷 한글 문서(HWP/HWPX) 완벽 대응**: HWP, HWPX를 비롯해 PDF, Word, Excel 등 실무에서 자주 쓰이는 다양한 문서를 지원하며 문서 서식과 수치 정합성을 100% 보존합니다.
 - **🤖 목적에 따른 두 가지 MD 변환 모드**:
-  - `G-Notebook 최적화`: 구글 AI 도구인 Gemini Notebook이 내용을 가장 잘 이해할 수 있도록 표를 평탄화하고 텍스트를 최적 정제합니다.
+  - `G-Notebook 최적화`: 구글 AI 서비스인 Gemini Notebook (NotebookLM)이 내용을 가장 잘 이해할 수 있도록 표를 평탄화하고 텍스트를 최적 정제합니다.
   - `기본 모드`: 후처리를 거치지 않고 KORDOC 엔진의 순수 원본 마크다운을 보존합니다.
 - **📂 대용량 문서 일괄 변환**: 단일 파일뿐만 아니라 폴더 단위 변환을 지원하며, 하위 폴더까지 탐색하여 수백 개의 문서도 한 번의 클릭으로 일괄 처리합니다.
-- **☁️ Gemini Notebook 다이렉트 업로드**: 지정한 Gemini Notebook으로 문서를 자동 업로드(최대 3개 동시 병렬)하여 작업 효율을 극대화합니다.
+- **☁️ Gemini Notebook 다이렉트 업로드**: 지정한 Gemini Notebook (NotebookLM)으로 문서를 자동 업로드(최대 3개 동시 병렬)하여 작업 효율을 극대화합니다.
   - `스마트 덮어쓰기 (중복 방지)`: 이미 Gemini Notebook에 동일한 이름의 소스 문서가 존재할 경우, 기존 소스를 자동으로 지우고 최신 내용으로 업데이트합니다.
   - `자동 재시도`: 네트워크 문제 등으로 업로드 실패 시 최대 3회 자동 재시도하여 안정성을 보장합니다.
 
@@ -122,17 +129,17 @@ npm run build:portable
 # (내부 명령: tauri build --no-bundle)
 ```
 
-빌드 완료 후 `src-tauri/target/release/Hwp-to-MD_Converter_v2.0.exe` 가 생성됩니다.
+빌드 완료 후 `src-tauri/target/release/Hwp-to-MD_Converter_v1.0.exe` 가 생성됩니다.
 
 ---
 
-### Step 5. 최종 배포 패키지 구성 (`Hwp-to-MD_Converter_v2.0`)
+### Step 5. 최종 배포 패키지 구성 (`Hwp-to-MD_Converter_v1.0`)
 
 배포 시에는 불필요한 `node_modules` 없이 아래 핵심 파일만 모아서 배포합니다.
 
 ```
-(실행기) Hwp-to-MD_Converter_v2.0/
-├── Hwp-to-MD_Converter_v2.0.exe     ── Tauri v2 Rust 데스크톱 포터블 앱
+(실행기) Hwp-to-MD_Converter_v1.0/
+├── Hwp-to-MD_Converter_v1.0.exe     ── Tauri v2 Rust 데스크톱 포터블 앱
 └── core/
     ├── node.exe                  ── 순정 Node.js 실행 엔진
     ├── worker_bundle.cjs         ── ESBuild 초압축 단일 번들 워커
