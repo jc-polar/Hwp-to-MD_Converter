@@ -1,0 +1,43 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "productName": "Hwp-to-MD_Converter_v2.0",
+  "version": "2.0.0",
+  "identifier": "com.kodoc.mdpdfparcel",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1422",
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "core/node.exe",
+      "core/worker_bundle.cjs",
+      "core/pdf_worker.exe"
+    ]
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Hwp-to-MD_Converter v2.0",
+        "width": 350,
+        "height": 530,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

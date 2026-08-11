@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Hwp-to-MD_Converter v2.0</title>
+    <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <main class="card">
+            
+            <div id="update-banner" class="update-banner hidden">
+                <span id="update-banner-icon" class="update-banner-icon">🚀</span>
+                <div class="update-banner-content">
+                    <span id="update-banner-text" class="update-banner-text">새로운 버전이 추가되었습니다.</span>
+                    <button id="btn-update-download" class="btn-update-download">[공식 깃허브]</button>
+                </div>
+                <button id="btn-update-close" class="btn-update-close" title="닫기">&times;</button>
+            </div>
+
+            <header class="header">
+                <div class="title-container">
+                    <h1 class="title">Hwp-to-MD_Converter <span style="font-size: 14px; font-weight: 700; color: #3b82f6; -webkit-text-fill-color: #3b82f6; vertical-align: middle;">v2.0</span></h1>
+                    <p class="subtitle">연구사업관리 지원 도구</p>
+                </div>
+            </header>
+
+            <hr class="divider">
+
+            <section class="section file-section">
+                <div class="btn-selection-grid">
+                    <button id="btn-folder" class="btn btn-folder">
+                        📂 폴더 선택
+                    </button>
+                    <button id="btn-file" class="btn btn-file">
+                        📄 파일 선택
+                    </button>
+                </div>
+                <div class="status-badge" id="file-status">선택된 대상이 없습니다.</div>
+            </section>
+
+            <section class="section options-section">
+                <div class="input-container" style="margin-bottom: 16px;">
+                    <label for="select-convert-mode" class="input-label" style="font-weight: 700; font-size: 13px; margin-bottom: 8px; display: block;">⚙️ 변환 형식 설정</label>
+                    <select id="select-convert-mode" class="text-input select-input">
+                        <option value="DUAL" selected>⚡ MD/PDF 통합 변환 (저장: 통합_변환)</option>
+                        <option value="MD">📝 MD 전용 변환 (저장: MD_변환)</option>
+                        <option value="PDF">📄 PDF 전용 변환 (저장: PDF_변환)</option>
+                    </select>
+                </div>
+
+                <div id="md-mode-section">
+                    <h2 class="section-title">⚙️ MD 변환 모드</h2>
+
+                    <div class="radio-group" style="margin-bottom: 8px;">
+                        <label class="radio-card" title="Gemini Notebook 등 RAG AI 분석에 최적화되도록&#10;표를 평탄화하고, 텍스트 및 하이퍼링크를 정제합니다.">
+                            <input type="radio" name="convertMode" value="B" checked>
+                            <span class="card-content">
+                                <span class="card-title">G-Notebook 최적화</span>
+                                <span class="card-desc">표 및 텍스트 정제</span>
+                            </span>
+                        </label>
+                        <label class="radio-card" title="후처리를 거치지 않고, KORDOC 엔진의 결과 문서를&#10;원본 그대로 출력합니다.">
+                            <input type="radio" name="convertMode" value="A">
+                            <span class="card-content">
+                                <span class="card-title">기본 모드</span>
+                                <span class="card-desc">KORDOC 원본 유지</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="options-grid">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chk-include-sub">
+                        <span class="slider blue"></span>
+                        <span class="label-text">하위 폴더 포함</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chk-open-folder">
+                        <span class="slider green"></span>
+                        <span class="label-text">완료 후 폴더 열기</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chk-local-save">
+                        <span class="slider blue"></span>
+                        <span class="label-text">변환파일 로컬 저장</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chk-upload">
+                        <span class="slider orange"></span>
+                        <span class="label-text">G-Notebook 자동 업로드</span>
+                    </label>
+                </div>
+
+                <div class="input-container" id="url-input-container" style="display: none;">
+                    <label for="notebook-url" class="input-label">G-Notebook URL</label>
+                    <input type="url" id="notebook-url" class="text-input" placeholder="https://notebook.google.com/notebook/...">
+                </div>
+            </section>
+
+            <section class="section action-section">
+                <button id="btn-start" class="btn btn-primary">
+                    🚀 변환 시작
+                </button>
+            </section>
+            
+            <section class="section status-section">
+                <div class="progress-container">
+                    <div class="status-row">
+                        <span class="status-text-total">준비 완료</span>
+                    </div>
+                    <div class="progress-bar-bg total">
+                        <div class="progress-fill total" style="width: 0%;"></div>
+                    </div>
+                    <div class="status-row" style="margin-top: 4px; padding: 0 2px;">
+                        <span class="status-text-detail" style="font-size: 11px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; min-height: 16px;"></span>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

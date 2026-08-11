@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+src-tauri/core/node_modules/
+
+# Build Outputs
+dist/
+src-tauri/target/
+MD_변환/
+PDF_변환/
+통합_변환/
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.tmp
+
+# Backup Folders
+backup/
+
+# Binary & Document Artifacts
+*.log
+*.hwp
+*.hwpx
+*.pdf
+*.md
+!README.md
+
+# Binary Exclusions
+*.exe
+*.dll
+src-tauri/core/node.exe
+src-tauri/core/worker_bundle.cjs
+!src-tauri/core/pdf_worker.exe
+
