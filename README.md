@@ -28,7 +28,7 @@
 
 - **🇰🇷 한글 문서(HWP/HWPX) 완벽 대응**: HWP, HWPX를 비롯해 PDF, Word, Excel 등 실무에서 자주 쓰이는 다양한 문서를 지원하며 문서 서식과 수치 정합성을 100% 보존합니다.
 - **🤖 목적에 따른 두 가지 MD 변환 모드**:
-  - `G-Notebook 최적화`: 구글 AI 서비스인 Gemini Notebook (NotebookLM)이 내용을 가장 잘 이해할 수 있도록 표를 평탄화하고 텍스트를 최적 정제합니다.
+  - `G-Notebook 최적화`: 구글 AI 서비스인 Gemini Notebook(NotebookLM)이 내용을 가장 잘 이해할 수 있도록 표를 평탄화하고 텍스트를 최적 정제합니다.
   - `기본 모드`: 후처리를 거치지 않고 KORDOC 엔진의 순수 원본 마크다운을 보존합니다.
 - **📂 대용량 문서 일괄 변환**: 단일 파일뿐만 아니라 폴더 단위 변환을 지원하며, 하위 폴더까지 탐색하여 수백 개의 문서도 한 번의 클릭으로 일괄 처리합니다.
 - **☁️ Gemini Notebook 다이렉트 업로드**: 지정한 Gemini Notebook (NotebookLM)으로 문서를 자동 업로드(최대 3개 동시 병렬)하여 작업 효율을 극대화합니다.
@@ -129,7 +129,7 @@ npm run build:portable
 # (내부 명령: tauri build --no-bundle)
 ```
 
-빌드 완료 후 `src-tauri/target/release/Hwp-to-MD_Converter_v1.0.exe` 가 생성됩니다.
+빌드 완료 후 `src-tauri/target/release/Hwp-to-MD_Converter.exe` 가 생성됩니다.
 
 ---
 
@@ -139,7 +139,7 @@ npm run build:portable
 
 ```
 (실행기) Hwp-to-MD_Converter_v1.0/
-├── Hwp-to-MD_Converter_v1.0.exe     ── Tauri v2 Rust 데스크톱 포터블 앱
+├── Hwp-to-MD_Converter.exe     ── Tauri v2 Rust 데스크톱 포터블 앱
 └── core/
     ├── node.exe                  ── 순정 Node.js 실행 엔진
     ├── worker_bundle.cjs         ── ESBuild 초압축 단일 번들 워커
