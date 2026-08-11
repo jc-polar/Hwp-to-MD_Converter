@@ -239,7 +239,7 @@ function flattenHtmlTablesToMd(mdText, isNotebookLMMode) {
                     });
                 });
 
-                // [수치/통계 다차원 표 판별]: 셀 내부 수치 밀도(숫자/퍼센트/금액 개수)로 판단
+                // [다차원 수치 데이터 표 판별]: 셀 내부 수치 밀도로 판단
                 const cellTextContent = grid.flat().filter(Boolean).join(' ');
                 const numericMatches = cellTextContent.match(/\b\d+([.,]\d+)?%?|\d{1,3}(,\d{3})+/g) || [];
                 const isNumericOrBudgetTable = numericMatches.length >= 4;
@@ -247,7 +247,7 @@ function flattenHtmlTablesToMd(mdText, isNotebookLMMode) {
                 let mdTable = '\n';
                 if (isNotebookLMMode) {
                     if (maxCols >= 3 || isNumericOrBudgetTable) {
-                        // [핵심 요구사항]: 수치/통계 다차원 표는 1차원으로 풀지 않고 2D Grid 마크다운 표(|---|) 구조 100% 보존
+                        // 수치 데이터 표는 1차원으로 풀지 않고 2D Grid 마크다운 표(|---|) 구조 보존
                         for (let r = 0; r < numRows; r++) {
                             const rowCols = grid[r].map(val => val === null ? '' : val);
                             mdTable += '| ' + rowCols.join(' | ') + ' |\n';
