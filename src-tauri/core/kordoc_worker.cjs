@@ -117,7 +117,7 @@ function normalizeCheckboxesAndBoxes(text) {
 }
 
 /**
- * [원칙 5] NotebookLM 및 LLM 전처리 마크다운 범용 무결성 정제
+ * [원칙 5] Gemini Notebook 및 LLM 전처리 마크다운 범용 무결성 정제
  */
 function sanitizeMdForNotebookLM(text) {
     if (!text) return text;
@@ -138,7 +138,7 @@ function sanitizeMdForNotebookLM(text) {
     text = text.replace(/&#39;/gi, "'");
     text = text.replace(/&nbsp;/gi, ' ');
 
-    // 5) NotebookLM 보안 링크 소거 방지를 위한 하이퍼링크 텍스트 보정 ([anchor](URL) -> anchor (URL))
+    // 5) Gemini Notebook 보안 링크 소거 방지를 위한 하이퍼링크 텍스트 보정 ([anchor](URL) -> anchor (URL))
     text = text.replace(/(?<!\!)\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
     
     // 7) 의미 없는 연속된 빈 줄(3줄 이상) 2줄로 정제
