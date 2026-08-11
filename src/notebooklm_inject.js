@@ -216,7 +216,7 @@ export const uploadScriptTemplate = `
             }
         }
 
-        // 동시성 제어 업로드 로직 (최대 3개 동시, 1회 × 3세트 파도타기 큐)
+        // 병렬 동시성 제어 및 단계별 재시도 업로드 큐 (최대 3개 동시 파이프라인)
         const maxConcurrency = 3;
         const results = [];
         const failedQueue1 = [];

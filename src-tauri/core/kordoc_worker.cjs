@@ -10,7 +10,7 @@ const cheerio = require('cheerio');
 
 
 /**
- * [거시적 원칙 1] 꺾쇠괄호(<...>) 용어의 범용 이스케이프 보정:
+ * [원칙 1] 꺾쇠괄호(<...>) 용어의 범용 이스케이프 보정:
  * 마크다운 뷰어, LLM Sanitizer, Cheerio DOM 파서가 본문 내 꺾쇠 용어(<...>)를
  * 무효한 HTML 커스텀 태그로 오인하여 본문 텍스트를 소거(Strip)하거나 강제 닫는 태그를 생성하는 현상을 방지합니다.
  * 표준 HTML 태그(sup, sub, br, table, tr, td 등) 이외의 모든 <...>를 &lt;...&gt;로 변환하여 100% 원본 텍스트 구조를 보존합니다.
@@ -34,7 +34,7 @@ function escapeNonHtmlBrackets(text) {
 }
 
 /**
- * [거시적 원칙 2] DOM 구조 기반 셀 내부 문단/줄바꿈 경계 자연 분리:
+ * [원칙 2] DOM 구조 기반 셀 내부 문단/줄바꿈 경계 자연 분리:
  * HWP 단일 셀 내부에서 엔터(Enter)나 문단(Paragraph), span 태그로 나뉜 복수의 수치/문장들이 공백 없이 뭉개지는 현상을 방지하기 위해,
  * DOM 요소(span, font, b, p, div, br 등)의 모든 경계에 개행(\n)을 삽입한 후 마크다운 표 표준 <br> 태그로 안전하게 변환합니다.
  */
@@ -66,7 +66,7 @@ function cleanCellDomText(cellElement, $) {
 }
 
 /**
- * [거시적 원칙 3] HTML <sup>/<sub> 첨자 태그 수식 정보 표준 보존
+ * [원칙 3] HTML <sup>/<sub> 첨자 태그 수식 정보 표준 보존
  */
 function preserveSupSubAndEquations(text) {
     if (!text) return text;
@@ -90,7 +90,7 @@ function preserveSupSubAndEquations(text) {
 }
 
 /**
- * [거시적 원칙 4] 체크박스 서식 마크다운 표준화 (- [x] / - [ ])
+ * [원칙 4] 체크박스 서식 마크다운 표준화 (- [x] / - [ ])
  * 한컴 기호(■, ☑, □, ☐)를 LLM 표준 Boolean 인터페이스 서식으로 범용 통합
  */
 function normalizeCheckboxesAndBoxes(text) {
@@ -117,7 +117,7 @@ function normalizeCheckboxesAndBoxes(text) {
 }
 
 /**
- * [거시적 원칙 5] NotebookLM 및 LLM 전처리 마크다운 범용 무결성 정제
+ * [원칙 5] NotebookLM 및 LLM 전처리 마크다운 범용 무결성 정제
  */
 function sanitizeMdForNotebookLM(text) {
     if (!text) return text;
@@ -159,7 +159,7 @@ function sanitizeMdForNotebookLM(text) {
  * HTML table을 순수 Markdown table 포맷으로 평탄화하며 수치/예산/통계 표는 2D Grid(|---|)를 보존합니다.
  */
 function flattenHtmlTablesToMd(mdText, isNotebookLMMode) {
-    // [거시적 원칙 1]: Cheerio DOM 트리 생성 직전에 모든 비-HTML 꺾쇠를 사전 이스케이프하여
+    // [원칙 1]: Cheerio DOM 트리 생성 직전에 모든 비-HTML 꺾쇠를 사전 이스케이프하여
     // Cheerio가 커스텀 HTML 태그로 오인하고 문서 말단에 닫는 태그를 강제로 덧붙이는 현상 원천 차단
     mdText = escapeNonHtmlBrackets(mdText);
 
