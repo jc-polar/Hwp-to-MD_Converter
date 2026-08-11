@@ -28,7 +28,7 @@
   "app": {
     "windows": [
       {
-        "title": "Hwp-to-MD_Converter v2.0",
+        "title": "Hwp-to-MD_Converter v1.0",
         "width": 350,
         "height": 530,
         "resizable": true,
