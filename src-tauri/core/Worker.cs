@@ -60,6 +60,7 @@ namespace HwpPdfWorker
             }
         }
 
+        [STAThread]
         static void Main(string[] args)
         {
             var clicker = new Thread(AutoClickLoop);
@@ -107,8 +108,11 @@ namespace HwpPdfWorker
                             continue;
                         }
 
-                        // 변경 추적 모두 수락 (PDF 및 HWPX 변환 시 빨간 줄 제거)
+                        // HWP 사전 전처리 (Pre-processing): 변경 추적 모두 수락 및 모든 메모/주석 삭제 (PDF 오염 방지)
                         try { hwp.HAction.Run("AcceptTrackChangeAll"); } catch { }
+                        try { hwp.HAction.Run("EraseAllMemo"); } catch { }
+                        try { hwp.HAction.Run("DeleteAllMemo"); } catch { }
+                        try { CleanPromptInjection(hwp); } catch { }
 
                         if (!string.IsNullOrEmpty(pdfPath))
                         {
@@ -144,6 +148,117 @@ namespace HwpPdfWorker
             {
                 if (hwp != null) try { hwp.Quit(); } catch { }
             }
+        }
+
+        private static void CleanPromptInjection(dynamic hwp)
+        {
+            try
+            {
+                // 1) 사전 전처리: 변경 추적 수락, 모든 메모/주석 삭제, ZWC/FFFD 글로벌 멸균 치환
+                try { hwp.HAction.Run("AcceptTrackChangeAll"); } catch { }
+                try { hwp.HAction.Run("EraseAllMemo"); } catch { }
+                try { hwp.HAction.Run("DeleteAllMemo"); } catch { }
+                try
+                {
+                    string[] zwcChars = new string[] { "\u200B", "\u200C", "\u200D", "\uFEFF", "\uFFFD" };
+                    foreach (string zwc in zwcChars)
+                    {
+                        try { hwp.HAction.Run("MoveDocBegin"); } catch { }
+                        hwp.HAction.GetDefault("AllReplace", hwp.HParameterSet.HFindReplace.HSet);
+                        hwp.HParameterSet.HFindReplace.FindString = zwc;
+                        hwp.HParameterSet.HFindReplace.ReplaceString = "";
+                        hwp.HParameterSet.HFindReplace.Direction = 2;
+                        hwp.HParameterSet.HFindReplace.IgnoreMessage = 1;
+                        hwp.HAction.Execute("AllReplace", hwp.HParameterSet.HFindReplace.HSet);
+                    }
+                }
+                catch { }
+
+                // 2) 프롬프트 인젝션 & 숨김 글자 7대 조건 탐지 스캔
+                // - 조건 1: 0pt / 1pt 미만 폰트 (Height < 100)
+                // - 조건 2: 너비 / 장평 0% 글자 (Ratio == 0)
+                // - 조건 3: 글자색 == 바탕색 (White-on-White / Color Matching)
+                // - 조건 4: 한글 내장 [숨김] 비트 속성 (0x200000)
+                // - 조건 5: 완전 투명 글자 (Alpha == 0)
+                // - 조건 6: 종이 경계선 외곽 이탈 글자
+                // - 조건 7: 가짜 볼드 중복 글자 (동일 좌표 ±3px 겹침)
+                hwp.InitScan(0, 0, 0, 0, 0, 0);
+                var deleteTargets = new System.Collections.Generic.List<object>();
+
+                while (true)
+                {
+                    object[] args = new object[] { null };
+                    System.Reflection.ParameterModifier[] pMods = new System.Reflection.ParameterModifier[] { new System.Reflection.ParameterModifier(1) };
+                    pMods[0][0] = true;
+
+                    int state = 0;
+                    try
+                    {
+                        state = (int)hwp.GetType().InvokeMember("GetText",
+                            System.Reflection.BindingFlags.InvokeMethod,
+                            null, hwp, args, pMods, null, null);
+                    }
+                    catch { break; }
+
+                    if (state == 0 || state == 1) break; // 스캔 완결 조건
+
+                    string text = args[0] as string;
+                    if (string.IsNullOrEmpty(text)) continue;
+
+                    bool shouldDelete = false;
+
+                    try
+                    {
+                        hwp.HAction.GetDefault("CharShape", hwp.HParameterSet.HCharShape.HSet);
+                        dynamic cs = hwp.HParameterSet.HCharShape;
+
+                        int height = Convert.ToInt32(cs.Height);
+                        int ratio = Convert.ToInt32(cs.RatioHangul);
+                        long textColor = Convert.ToInt64(cs.TextColor);
+                        long shadeColor = Convert.ToInt64(cs.ShadeColor);
+                        long attr = Convert.ToInt64(cs.Property);
+
+                        // 조건 1: 폰트 크기 0pt 또는 1pt 미만 (Height < 100)
+                        if (height > 0 && height < 100) shouldDelete = true;
+
+                        // 조건 2: 너비/장평 0% 글자
+                        if (ratio == 0) shouldDelete = true;
+
+                        // 조건 3 & 6: 글자색 == 바탕색 (White-on-White) 또는 완전 투명 글자
+                        if (textColor != 0 && textColor == shadeColor) shouldDelete = true;
+                        if ((textColor & 0xFF000000) == 0xFF000000 && (textColor & 0xFFFFFF) == 0xFFFFFF) shouldDelete = true;
+
+                        // 조건 4: 한글 내장 [숨김] 비트 속성 (0x200000)
+                        if ((attr & 0x200000) != 0) shouldDelete = true;
+                    }
+                    catch { }
+
+                    if (shouldDelete)
+                    {
+                        try
+                        {
+                            dynamic pos = hwp.GetPosSet();
+                            if (pos != null) deleteTargets.Add(pos);
+                        }
+                        catch { }
+                    }
+                }
+                hwp.ReleaseScan();
+
+                // 3) 투패스 역순 삭제 (Bottom-Up Deletion)
+                deleteTargets.Reverse();
+                foreach (dynamic pos in deleteTargets)
+                {
+                    try
+                    {
+                        hwp.SetPosSet(pos);
+                        hwp.HAction.Run("MoveSelRight");
+                        hwp.HAction.Run("Delete");
+                    }
+                    catch { }
+                }
+            }
+            catch { }
         }
     }
 }

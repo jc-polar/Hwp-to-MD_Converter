@@ -5,9 +5,6 @@ src-tauri/core/node_modules/
 # Build Outputs
 dist/
 src-tauri/target/
-MD_변환/
-PDF_변환/
-통합_변환/
 
 # OS & Editor Files
 .DS_Store
@@ -16,8 +13,9 @@ Thumbs.db
 .idea/
 *.tmp
 
-# Backup Folders
+# Backup & Test Folders
 backup/
+test/
 
 # Binary & Document Artifacts
 *.log

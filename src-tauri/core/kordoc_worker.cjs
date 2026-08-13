@@ -122,32 +122,40 @@ function normalizeCheckboxesAndBoxes(text) {
 function sanitizeMdForNotebookLM(text) {
     if (!text) return text;
 
+    // 1) [프롬프트 인젝션 방지] 보이지 않는 유니코드 제어문자(ZWC) 및 깨진 제어문자 소거
+    text = text.replace(/[\u200B-\u200D\uFEFF\uFFFD]/g, '');
 
-    // 1) 마크다운 취소선 오작동 방지를 위해 물결표 전각 치환
+    // 2) 유니코드 정규화 (NFC): 자소 분리(NFD) 방지 및 결합 형태(NFC) 통일
+    text = text.normalize('NFC');
+
+    // 3) 마크다운 취소선 오작동 방지를 위해 물결표 전각 치환
     text = text.replace(/~/g, "～");
 
-    // 2) 코드블록 오작동을 유발하는 탭(\t) 문자를 공백 4칸으로 변경
+    // 4) 코드블록 오작동을 유발하는 탭(\t) 문자를 공백 4칸으로 변경
     text = text.replace(/\t/g, "    ");
     
-    // 3) 유령 공백(&nbsp;, \xa0)을 일반 공백으로 치환
+    // 5) 유령 공백(&nbsp;, \xa0)을 일반 공백으로 치환
     text = text.replace(/\xa0/g, " ");
     
-    // 4) 안전한 HTML 엔티티 디코딩 (&lt;/&gt; 이스케이프는 보존)
+    // 6) 안전한 HTML 엔티티 디코딩 (&lt;/&gt; 이스케이프는 보존)
     text = text.replace(/&amp;/gi, '&');
     text = text.replace(/&quot;/gi, '"');
     text = text.replace(/&#39;/gi, "'");
     text = text.replace(/&nbsp;/gi, ' ');
 
-    // 5) Gemini Notebook 보안 링크 소거 방지를 위한 하이퍼링크 텍스트 보정 ([anchor](URL) -> anchor (URL))
+    // 7) Gemini Notebook 보안 링크 소거 방지를 위한 하이퍼링크 텍스트 보정 ([anchor](URL) -> anchor (URL))
     text = text.replace(/(?<!\!)\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+
+    // 8) 마크다운 헤더(# 제목) 직후 표나 본문이 바짝 붙는 현상 방지를 위해 1줄 빈 줄 보장 (CRLF 완벽 호환)
+    text = text.replace(/^(#{1,6}[ \t]+[^\r\n]+)\r?\n(?=[^\r\n#])/gm, '$1\n\n');
     
-    // 7) 의미 없는 연속된 빈 줄(3줄 이상) 2줄로 정제
+    // 9) 의미 없는 연속된 빈 줄(3줄 이상) 2줄로 정제
     text = text.replace(/\n{3,}/g, '\n\n');
     
-    // 8) 범용 꺾쇠 이스케이프 (Non-HTML Brackets -> &lt;...&gt;)
+    // 10) 범용 꺾쇠 이스케이프 (Non-HTML Brackets -> &lt;...&gt;)
     text = escapeNonHtmlBrackets(text);
     
-    // 9) 전각 물결표 앞 백슬래시(\～) 최종 범용 청소
+    // 11) 전각 물결표 앞 백슬래시(\～) 최종 범용 청소
     text = text.replace(/\\～/g, '～');
     text = text.replace(/\\~/g, '～');
 
@@ -369,11 +377,31 @@ function createFolderTags(filePath, rootPath) {
     // 태그 내에서 마크다운이 깨지지 않도록 공백 및 허용되지 않은 특수문자를 언더스코어로 치환
     const cleanTags = tagParts
         .map(t => t.replace(/[^\w\uAC00-\uD7A30-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, ''))
-        .filter(t => t.length > 0);
-    
-    const tagString = `#${cleanTags.join('/')}`;
-    
-    return `> **📁 Tags:** ${tagString}\n\n`;
+    const tagString = cleanTags.length > 0 ? `#${cleanTags.join('/')}` : '';
+
+    let metaLine = '';
+    try {
+        const stats = fs.statSync(filePath);
+        const mtime = stats.mtime;
+        const formattedDate = mtime.getFullYear() + '-' +
+            String(mtime.getMonth() + 1).padStart(2, '0') + '-' +
+            String(mtime.getDate()).padStart(2, '0') + ' ' +
+            String(mtime.getHours()).padStart(2, '0') + ':' +
+            String(mtime.getMinutes()).padStart(2, '0') + ':' +
+            String(mtime.getSeconds()).padStart(2, '0');
+        const rawFileName = path.basename(filePath);
+        const safeFileName = rawFileName.replace(/[`\r\n]/g, '');
+        metaLine = `> **📄 File:** \`${safeFileName}\` | **🕒 Modified:** \`${formattedDate}\``;
+    } catch (e) {}
+
+    if (tagString && metaLine) {
+        return `> **📁 Tags:** ${tagString}\n${metaLine}\n\n`;
+    } else if (tagString) {
+        return `> **📁 Tags:** ${tagString}\n\n`;
+    } else if (metaLine) {
+        return `${metaLine}\n\n`;
+    }
+    return '';
 }
 
 /**
@@ -406,14 +434,15 @@ async function processDocument(filePath, origFilePath, outputDir, isNotebookLMMo
 
             // 이미지 커스텀 플레이스홀더(!image) 표준 마크다운 캡션 태그(![그림: ...](...))로 변환
             parsedText = normalizeImagePlaceholders(parsedText);
-            
-            parsedText = sanitizeMdForNotebookLM(parsedText);
-            
-            // 상대 경로 태그 주입
-            const tagStr = createFolderTags(origFilePath || filePath, rootPath);
-            if (tagStr) {
-                parsedText = tagStr + parsedText;
-            }
+        }
+        
+        // [공통 보안 멸균] G-Notebook 최적화 모드 및 기본 모드 모두 ZWC/FFFD 멸균 공통 적용
+        parsedText = sanitizeMdForNotebookLM(parsedText);
+        
+        // [공통 메타데이터] 상대 경로 태그 및 파일 정보 주입
+        const tagStr = createFolderTags(origFilePath || filePath, rootPath);
+        if (tagStr) {
+            parsedText = tagStr + parsedText;
         }
         
         fs.writeFileSync(finalPath, parsedText, 'utf-8');

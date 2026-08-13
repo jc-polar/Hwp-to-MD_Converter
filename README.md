@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🚀 Hwp-to-MD_Converter v1.0 (MD / PDF 통합 변환기)</h1>
+  <h1>🚀 Hwp-to-MD_Converter v1.1.0 (MD / PDF 통합 변환기)</h1>
   <p><strong>문서를 MD / PDF 로 변환하는 데스크톱 애플리케이션</strong></p>
   <p><em>(Tauri v2 기반 포터블 데스크톱 버전)</em></p>
 </div>
