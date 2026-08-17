@@ -175,75 +175,74 @@ namespace HwpPdfWorker
                 catch { }
 
                 // 2) 프롬프트 인젝션 & 숨김 글자 7대 조건 탐지 스캔
-                // - 조건 1: 0pt / 1pt 미만 폰트 (Height < 100)
-                // - 조건 2: 너비 / 장평 0% 글자 (Ratio == 0)
-                // - 조건 3: 글자색 == 바탕색 (White-on-White / Color Matching)
-                // - 조건 4: 한글 내장 [숨김] 비트 속성 (0x200000)
-                // - 조건 5: 완전 투명 글자 (Alpha == 0)
-                // - 조건 6: 종이 경계선 외곽 이탈 글자
-                // - 조건 7: 가짜 볼드 중복 글자 (동일 좌표 ±3px 겹침)
-                hwp.InitScan(0, 0, 0, 0, 0, 0);
                 var deleteTargets = new System.Collections.Generic.List<object>();
-
-                while (true)
+                try
                 {
-                    object[] args = new object[] { null };
-                    System.Reflection.ParameterModifier[] pMods = new System.Reflection.ParameterModifier[] { new System.Reflection.ParameterModifier(1) };
-                    pMods[0][0] = true;
+                    hwp.InitScan(0, 0, 0, 0, 0, 0);
 
-                    int state = 0;
-                    try
+                    while (true)
                     {
-                        state = (int)hwp.GetType().InvokeMember("GetText",
-                            System.Reflection.BindingFlags.InvokeMethod,
-                            null, hwp, args, pMods, null, null);
-                    }
-                    catch { break; }
+                        object[] args = new object[] { null };
+                        System.Reflection.ParameterModifier[] pMods = new System.Reflection.ParameterModifier[] { new System.Reflection.ParameterModifier(1) };
+                        pMods[0][0] = true;
 
-                    if (state == 0 || state == 1) break; // 스캔 완결 조건
-
-                    string text = args[0] as string;
-                    if (string.IsNullOrEmpty(text)) continue;
-
-                    bool shouldDelete = false;
-
-                    try
-                    {
-                        hwp.HAction.GetDefault("CharShape", hwp.HParameterSet.HCharShape.HSet);
-                        dynamic cs = hwp.HParameterSet.HCharShape;
-
-                        int height = Convert.ToInt32(cs.Height);
-                        int ratio = Convert.ToInt32(cs.RatioHangul);
-                        long textColor = Convert.ToInt64(cs.TextColor);
-                        long shadeColor = Convert.ToInt64(cs.ShadeColor);
-                        long attr = Convert.ToInt64(cs.Property);
-
-                        // 조건 1: 폰트 크기 0pt 또는 1pt 미만 (Height < 100)
-                        if (height > 0 && height < 100) shouldDelete = true;
-
-                        // 조건 2: 너비/장평 0% 글자
-                        if (ratio == 0) shouldDelete = true;
-
-                        // 조건 3 & 6: 글자색 == 바탕색 (White-on-White) 또는 완전 투명 글자
-                        if (textColor != 0 && textColor == shadeColor) shouldDelete = true;
-                        if ((textColor & 0xFF000000) == 0xFF000000 && (textColor & 0xFFFFFF) == 0xFFFFFF) shouldDelete = true;
-
-                        // 조건 4: 한글 내장 [숨김] 비트 속성 (0x200000)
-                        if ((attr & 0x200000) != 0) shouldDelete = true;
-                    }
-                    catch { }
-
-                    if (shouldDelete)
-                    {
+                        int state = 0;
                         try
                         {
-                            dynamic pos = hwp.GetPosSet();
-                            if (pos != null) deleteTargets.Add(pos);
+                            state = (int)hwp.GetType().InvokeMember("GetText",
+                                System.Reflection.BindingFlags.InvokeMethod,
+                                null, hwp, args, pMods, null, null);
+                        }
+                        catch { break; }
+
+                        if (state == 0 || state == 1) break; // 스캔 완결 조건
+
+                        string text = args[0] as string;
+                        if (string.IsNullOrEmpty(text)) continue;
+
+                        bool shouldDelete = false;
+
+                        try
+                        {
+                            hwp.HAction.GetDefault("CharShape", hwp.HParameterSet.HCharShape.HSet);
+                            dynamic cs = hwp.HParameterSet.HCharShape;
+
+                            int height = Convert.ToInt32(cs.Height);
+                            int ratio = Convert.ToInt32(cs.RatioHangul);
+                            long textColor = Convert.ToInt64(cs.TextColor);
+                            long shadeColor = Convert.ToInt64(cs.ShadeColor);
+                            long attr = Convert.ToInt64(cs.Property);
+
+                            // 조건 1: 폰트 크기 0pt 또는 1pt 미만 (Height < 100)
+                            if (height > 0 && height < 100) shouldDelete = true;
+
+                            // 조건 2: 너비/장평 0% 글자
+                            if (ratio == 0) shouldDelete = true;
+
+                            // 조건 3 & 6: 글자색 == 바탕색 (White-on-White) 또는 완전 투명 글자
+                            if (textColor != 0 && textColor == shadeColor) shouldDelete = true;
+                            if ((textColor & 0xFF000000) == 0xFF000000 && (textColor & 0xFFFFFF) == 0xFFFFFF) shouldDelete = true;
+
+                            // 조건 4: 한글 내장 [숨김] 비트 속성 (0x200000)
+                            if ((attr & 0x200000) != 0) shouldDelete = true;
                         }
                         catch { }
+
+                        if (shouldDelete)
+                        {
+                            try
+                            {
+                                dynamic pos = hwp.GetPosSet();
+                                if (pos != null) deleteTargets.Add(pos);
+                            }
+                            catch { }
+                        }
                     }
                 }
-                hwp.ReleaseScan();
+                finally
+                {
+                    try { hwp.ReleaseScan(); } catch { }
+                }
 
                 // 3) 투패스 역순 삭제 (Bottom-Up Deletion)
                 deleteTargets.Reverse();

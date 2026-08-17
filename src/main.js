@@ -423,8 +423,39 @@ function initApp() {
     toggleMdModeSection();
     checkUpdate();
 
-    document.addEventListener('dragover', (e) => e.preventDefault(), false);
-    document.addEventListener('drop', (e) => e.preventDefault(), false);
+    let dragCounter = 0;
+    const dropOverlay = document.getElementById('drop-zone-overlay');
+
+    window.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dragCounter++;
+        if (dropOverlay) dropOverlay.classList.add('active');
+    });
+
+    window.addEventListener('dragover', (e) => e.preventDefault(), false);
+
+    window.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) {
+            dragCounter = 0;
+            if (dropOverlay) dropOverlay.classList.remove('active');
+        }
+    });
+
+    window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        if (dropOverlay) dropOverlay.classList.remove('active');
+    }, false);
+
+    listen('tauri://drag-enter', () => {
+        if (dropOverlay) dropOverlay.classList.add('active');
+    });
+
+    listen('tauri://drag-leave', () => {
+        if (dropOverlay) dropOverlay.classList.remove('active');
+    });
 
     async function handleDroppedPaths(paths) {
         if (!paths || paths.length === 0) return;
@@ -451,6 +482,8 @@ function initApp() {
     }
 
     listen('tauri://drag-drop', async (event) => {
+        if (dropOverlay) dropOverlay.classList.remove('active');
+        dragCounter = 0;
         let paths = [];
         if (event.payload && event.payload.paths) {
             paths = event.payload.paths;
@@ -461,8 +494,16 @@ function initApp() {
     });
 
     listen('tauri://file-drop', async (event) => {
+        if (dropOverlay) dropOverlay.classList.remove('active');
+        dragCounter = 0;
         let paths = event.payload;
         await handleDroppedPaths(paths);
+    });
+
+    listen('single-instance-args', async (event) => {
+        if (event.payload && Array.isArray(event.payload) && event.payload.length > 0) {
+            await handleDroppedPaths(event.payload);
+        }
     });
 }
 
