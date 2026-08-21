@@ -1,4 +1,4 @@
-// Hwp-to-MD_Converter v1.1.0 - Vite Configuration
+// Hwp-to-MD_Converter v1.1.2 - Vite Configuration
 import { defineConfig } from 'vite';
 
 export default defineConfig({

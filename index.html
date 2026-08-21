@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Hwp-to-MD_Converter v1.1.1</title>
+    <title>Hwp-to-MD_Converter v1.1.2</title>
     <link rel="stylesheet" href="/src/styles.css">
 </head>
 <body>
@@ -28,7 +28,7 @@
 
             <header class="header">
                 <div class="title-container">
-                    <h1 class="title">Hwp-to-MD_Converter <span style="font-size: 14px; font-weight: 700; color: #3b82f6; -webkit-text-fill-color: #3b82f6; vertical-align: middle;">v1.1.1</span></h1>
+                    <h1 class="title">Hwp-to-MD_Converter <span style="font-size: 14px; font-weight: 700; color: #3b82f6; -webkit-text-fill-color: #3b82f6; vertical-align: middle;">v1.1.2</span></h1>
                 </div>
             </header>
 
@@ -43,12 +43,30 @@
                         📄 파일 선택
                     </button>
                 </div>
-                <div class="status-badge" id="file-status">선택된 대상이 없습니다.</div>
+                
+                <div class="file-list-card">
+                    <div class="file-list-header">
+                        <span id="file-count-badge" class="file-count-badge">대기 문서: 0개</span>
+                        <div class="file-list-header-actions">
+                            <button id="btn-toggle-accumulate" class="btn-toggle-accumulate" title="켜면 새 파일이 기존 목록에 누적되고, 끄면 새 파일로 교체됩니다.">
+                                📥 담기: OFF
+                            </button>
+                            <button id="btn-clear-files" class="btn-clear-files" title="선택된 문서 목록 전체 삭제">
+                                🗑️ 비우기
+                            </button>
+                        </div>
+                    </div>
+                    <div id="file-list-container" class="file-list-container empty">
+                        <div class="file-list-placeholder">
+                            <span>문서나 폴더를 이곳에 드래그하거나<br>폴더 선택 또는 파일 선택 버튼을 눌러 추가하세요.</span>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <section class="section options-section">
-                <div class="input-container" style="margin-bottom: 16px;">
-                    <label for="select-convert-mode" class="input-label" style="font-weight: 700; font-size: 13px; margin-bottom: 8px; display: block;">⚙️ 변환 형식 설정</label>
+                <div class="input-container" style="margin-bottom: 8px;">
+                    <label for="select-convert-mode" class="input-label" style="font-weight: 700; font-size: 13px; margin-bottom: 6px; display: block;">⚙️ 변환 형식 설정</label>
                     <select id="select-convert-mode" class="text-input select-input">
                         <option value="DUAL" selected>⚡ MD/PDF 통합 변환 (저장: 통합_변환)</option>
                         <option value="MD">📝 MD 전용 변환 (저장: MD_변환)</option>
@@ -100,8 +118,8 @@
                     </label>
                 </div>
 
-                <div class="input-container" id="url-input-container" style="display: none;">
-                    <label for="notebook-url" class="input-label">G-Notebook URL</label>
+                <div class="input-container" id="url-input-container" style="display: none; margin-top: 8px;">
+                    <label for="notebook-url" class="input-label" style="margin-bottom: 4px; display: block;">G-Notebook URL</label>
                     <input type="url" id="notebook-url" class="text-input" placeholder="https://notebook.google.com/notebook/...">
                 </div>
             </section>

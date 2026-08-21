@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🚀 Hwp-to-MD Converter v1.1.1 (한글 문서 변환기)</h1>
+  <h1>🚀 Hwp-to-MD Converter v1.1.2 (한글 문서 변환기)</h1>
   <p><strong>HWP / HWPX 문서를 안전하게 마크다운(MD) 및 PDF로 변환하는 로컬 데스크톱 앱</strong></p>
   <p><em>(Tauri v2 + C# OLE Automation + Node.js Cheerio RAG Engine)</em></p>
 </div>
@@ -133,12 +133,12 @@ npm run build:portable
 
 ---
 
-### Step 5. 최종 배포 패키지 구성 (`Hwp-to-MD_Converter_v1.1.1`)
+### Step 5. 최종 배포 패키지 구성 (`Hwp-to-MD_Converter_v1.1.2`)
 
 배포 시에는 불필요한 `node_modules` 없이 아래 핵심 파일만 모아서 배포합니다.
 
 ```
-(실행기) Hwp-to-MD_Converter_v1.1.1/
+(실행기) Hwp-to-MD_Converter_v1.1.2/
 ├── Hwp-to-MD_Converter.exe     ── Tauri v2 Rust 데스크톱 포터블 앱
 └── core/
     ├── node.exe                  ── 순정 Node.js 실행 엔진

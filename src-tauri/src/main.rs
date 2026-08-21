@@ -98,6 +98,28 @@ async fn close_webview(app: tauri::AppHandle, label: String) -> Result<(), Strin
 }
 
 #[command]
+async fn get_clipboard_files() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-Command", "Get-Clipboard -Format FileDropList"]);
+        cmd.creation_flags(0x08000000);
+        let output = cmd.output().map_err(|e| e.to_string())?;
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let paths: Vec<String> = stdout
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect();
+            return Ok(paths);
+        }
+    }
+    Ok(Vec::new())
+}
+
+#[command]
 fn save_error_log(app: tauri::AppHandle, content: String) -> Result<String, String> {
     use std::io::Write;
     let exe_dir = std::env::current_exe()
@@ -252,6 +274,22 @@ async fn process_dual_documents(
             if let Some(name) = src.file_name() {
                 let dest = output_dir.join(name);
                 let _ = fs::copy(&src, &dest);
+            }
+        }
+
+        // DUAL 또는 PDF 모드일 때: 입력된 원본 PDF 파일도 결과 폴더에 복사 보존
+        if mode == "DUAL" || mode == "PDF" {
+            for req in &expanded_files {
+                let src = PathBuf::from(&req.path);
+                let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                if ext == "pdf" {
+                    if let Some(name) = src.file_name() {
+                        let dest = output_dir.join(name);
+                        if src != dest {
+                            let _ = fs::copy(&src, &dest);
+                        }
+                    }
+                }
             }
         }
     }
@@ -585,7 +623,8 @@ fn main() {
             preview_folder_files,
             process_dual_documents,
             cleanup_temp_files,
-            kill_zombie_processes
+            kill_zombie_processes,
+            get_clipboard_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -16,6 +16,7 @@ Thumbs.db
 # Backup & Test Folders
 backup/
 test/
+.agents/
 
 # Binary & Document Artifacts
 *.log

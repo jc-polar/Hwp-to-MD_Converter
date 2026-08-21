@@ -7,6 +7,7 @@ const state = {
     selectedFiles: [],
     selectedFolder: '',
     selectionMode: '', // 'file' or 'folder'
+    accumulateMode: false, // '담기' 모드 (기본값: false, 꺼짐)
     uploadModeEnabled: false,
     uploadQueue: [],
     isUploading: false,
@@ -22,11 +23,22 @@ const state = {
 
 let globalNotebookSession = null;
 
+const SUPPORTED_EXTS = new Set(['hwp', 'hwpx', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt']);
+
+function isSupportedFile(path) {
+    if (!path) return false;
+    const ext = path.split('.').pop().toLowerCase();
+    return SUPPORTED_EXTS.has(ext);
+}
+
 const UI = {
     btnFile: null,
     btnFolder: null,
     btnStart: null,
-    selectedFilesText: null,
+    fileListContainer: null,
+    fileCountBadge: null,
+    btnToggleAccumulate: null,
+    btnClearFiles: null,
     chkLocalSave: null,
     chkUpload: null,
     chkIncludeSub: null,
@@ -41,7 +53,10 @@ const UI = {
         this.btnFile = document.getElementById('btn-file');
         this.btnFolder = document.getElementById('btn-folder');
         this.btnStart = document.getElementById('btn-start');
-        this.selectedFilesText = document.getElementById('file-status');
+        this.fileListContainer = document.getElementById('file-list-container');
+        this.fileCountBadge = document.getElementById('file-count-badge');
+        this.btnToggleAccumulate = document.getElementById('btn-toggle-accumulate');
+        this.btnClearFiles = document.getElementById('btn-clear-files');
         this.chkLocalSave = document.getElementById('chk-local-save');
         this.chkUpload = document.getElementById('chk-upload');
         this.chkIncludeSub = document.getElementById('chk-include-sub');
@@ -59,19 +74,120 @@ const UI = {
     }
 };
 
-function updateSelectedFilesUI() {
-    if (state.selectedFiles.length === 0) {
-        UI.selectedFilesText.innerText = '선택된 파일이 없습니다.';
-    } else {
-        const firstFileObj = state.selectedFiles[0];
-        const firstFileStr = typeof firstFileObj === 'object' ? firstFileObj.path : firstFileObj;
-        const firstFile = firstFileStr.split(/[\\/]/).pop();
-        if (state.selectedFiles.length === 1) {
-            UI.selectedFilesText.innerText = `📄 ${firstFile}`;
+function toggleAccumulateMode() {
+    state.accumulateMode = !state.accumulateMode;
+    if (UI.btnToggleAccumulate) {
+        if (state.accumulateMode) {
+            UI.btnToggleAccumulate.innerText = '📥 담기: ON';
+            UI.btnToggleAccumulate.classList.add('active');
+            UI.btnToggleAccumulate.title = '담기 ON: 새 파일을 넣으면 기존 목록에 누적 추가됩니다.';
         } else {
-            UI.selectedFilesText.innerText = `📄 (총 ${state.selectedFiles.length}개) ${firstFile} 외 ${state.selectedFiles.length - 1}개`;
+            UI.btnToggleAccumulate.innerText = '📥 담기: OFF';
+            UI.btnToggleAccumulate.classList.remove('active');
+            UI.btnToggleAccumulate.title = '담기 OFF: 새 파일을 넣으면 이전 목록이 지워지고 교체됩니다.';
         }
     }
+}
+
+function updateSelectedFilesUI() {
+    if (!UI.fileListContainer || !UI.fileCountBadge) return;
+
+    const count = state.selectedFiles.length;
+    UI.fileCountBadge.innerText = `대기 문서: ${count}개`;
+
+    if (count === 0) {
+        UI.fileListContainer.classList.add('empty');
+        UI.fileListContainer.innerHTML = `
+            <div class="file-list-placeholder">
+                <span>문서나 폴더를 이곳에 드래그하거나<br>폴더 선택 또는 파일 선택 버튼을 눌러 추가하세요.</span>
+            </div>
+        `;
+    } else {
+        UI.fileListContainer.classList.remove('empty');
+        UI.fileListContainer.innerHTML = '';
+
+        state.selectedFiles.forEach((fileObj, idx) => {
+            const filePath = typeof fileObj === 'object' ? fileObj.path : fileObj;
+            const fileName = filePath.split(/[\\/]/).pop();
+            const ext = fileName.split('.').pop().toLowerCase();
+
+            let icon = '📄';
+            if (ext === 'pdf') icon = '📕';
+            else if (ext === 'hwp' || ext === 'hwpx') icon = '📝';
+            else if (ext === 'xls' || ext === 'xlsx') icon = '📊';
+
+            const itemEl = document.createElement('div');
+            itemEl.className = 'file-item';
+            itemEl.title = filePath;
+
+            const leftEl = document.createElement('div');
+            leftEl.className = 'file-item-left';
+
+            const iconEl = document.createElement('span');
+            iconEl.className = 'file-item-icon';
+            iconEl.innerText = icon;
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'file-item-name';
+            nameEl.innerText = fileName;
+
+            leftEl.appendChild(iconEl);
+            leftEl.appendChild(nameEl);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'file-item-remove';
+            removeBtn.setAttribute('title', '이 파일 목록에서 제외');
+            removeBtn.innerHTML = '&times;';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeFile(idx);
+            });
+
+            itemEl.appendChild(leftEl);
+            itemEl.appendChild(removeBtn);
+            UI.fileListContainer.appendChild(itemEl);
+        });
+    }
+}
+
+function appendFiles(filesToAdd) {
+    if (!filesToAdd || filesToAdd.length === 0) return;
+
+    // 담기(accumulateMode)가 꺼져 있으면 기존 목록 비우고 새로 교체
+    if (!state.accumulateMode) {
+        state.selectedFiles = [];
+    }
+
+    const existingPaths = new Set(state.selectedFiles.map(f => (typeof f === 'object' ? f.path : f)));
+    let addedCount = 0;
+
+    for (const item of filesToAdd) {
+        const filePath = typeof item === 'object' ? item.path : item;
+        const rootPath = typeof item === 'object' ? (item.rootPath || "") : "";
+
+        if (!filePath || !isSupportedFile(filePath)) continue;
+        if (existingPaths.has(filePath)) continue;
+
+        existingPaths.add(filePath);
+        state.selectedFiles.push({ path: filePath, rootPath: rootPath });
+        addedCount++;
+    }
+
+    updateSelectedFilesUI();
+}
+
+function removeFile(index) {
+    if (index >= 0 && index < state.selectedFiles.length) {
+        state.selectedFiles.splice(index, 1);
+        updateSelectedFilesUI();
+    }
+}
+
+function clearFiles() {
+    state.selectedFiles = [];
+    state.selectedFolder = '';
+    state.selectionMode = '';
+    updateSelectedFilesUI();
 }
 
 async function selectFiles() {
@@ -86,11 +202,7 @@ async function selectFiles() {
 
     if (selected) {
         const arr = Array.isArray(selected) ? selected : [selected];
-        state.selectedFiles = arr.map(f => {
-            return { path: f, rootPath: "" };
-        });
-        state.selectionMode = 'file';
-        updateSelectedFilesUI();
+        appendFiles(arr.map(f => ({ path: f, rootPath: "" })));
     }
 }
 
@@ -103,14 +215,16 @@ async function selectFolder() {
 
     if (selected) {
         state.selectedFolder = selected;
-        state.selectionMode = 'folder';
         try {
             const files = await invoke('preview_folder_files', {
                 folderPath: selected,
                 includeSub: UI.chkIncludeSub ? UI.chkIncludeSub.checked : false
             });
-            state.selectedFiles = files.map(f => ({ path: f, rootPath: selected }));
-            updateSelectedFilesUI();
+            if (files && files.length > 0) {
+                appendFiles(files.map(f => ({ path: f, rootPath: selected })));
+            } else {
+                await message('선택한 폴더에 지원하는 문서 파일이 없습니다.', { type: 'info' });
+            }
         } catch (e) {
             await message(`폴더 파일 목록 조회 실패: ${e}`, { type: 'error' });
         }
@@ -128,9 +242,55 @@ function toggleNotebookLMUpload() {
     }
 }
 
+function setInteractionDisabled(disabled) {
+    if (UI.btnFile) {
+        UI.btnFile.disabled = disabled;
+        UI.btnFile.style.opacity = disabled ? '0.6' : '1';
+    }
+    if (UI.btnFolder) {
+        UI.btnFolder.disabled = disabled;
+        UI.btnFolder.style.opacity = disabled ? '0.6' : '1';
+    }
+    if (UI.btnToggleAccumulate) {
+        UI.btnToggleAccumulate.disabled = disabled;
+        UI.btnToggleAccumulate.style.opacity = disabled ? '0.6' : '1';
+    }
+    if (UI.btnClearFiles) {
+        UI.btnClearFiles.disabled = disabled;
+        UI.btnClearFiles.style.opacity = disabled ? '0.6' : '1';
+    }
+    const removeButtons = document.querySelectorAll('.file-item-remove');
+    removeButtons.forEach(btn => {
+        btn.disabled = disabled;
+        btn.style.pointerEvents = disabled ? 'none' : 'auto';
+    });
+}
+
 async function startConversion() {
     if (state.selectedFiles.length === 0) {
         await message('변환할 문서 파일이나 폴더를 먼저 선택해 주세요.', { type: 'warning' });
+        return;
+    }
+
+    const currentMode = UI.getModeSelection();
+
+    let hwpCount = 0;
+    let nonHwpCount = 0;
+    state.selectedFiles.forEach(f => {
+        const p = typeof f === 'object' ? f.path : f;
+        const ext = (p.split('.').pop() || '').toLowerCase();
+        if (ext === 'hwp' || ext === 'hwpx') {
+            hwpCount++;
+        } else {
+            nonHwpCount++;
+        }
+    });
+
+    if (currentMode === 'PDF' && hwpCount === 0) {
+        await message('선택된 파일 중 PDF 변환을 지원하는 한글 문서(HWP/HWPX)가 없습니다.\n\n💡 엑셀, 워드, 텍스트 문서는 [MD 전용 변환] 또는 [통합 변환]을 이용해 주세요.', { 
+            type: 'warning', 
+            title: 'PDF 변환 대상 없음' 
+        });
         return;
     }
 
@@ -138,7 +298,7 @@ async function startConversion() {
     const isLocalSave = UI.chkLocalSave ? UI.chkLocalSave.checked : false;
 
     if (!state.uploadModeEnabled && !isLocalSave) {
-        await message('저장 방식이 선택되지 않았습니다.\n"변환파일 로컬 저장" 또는 "G-Notebook 자동 업로드" 중 최소 하나를 켜주세요.', { type: 'warning', title: '경고' });
+        await message('저장 방식이 선택되지 않았습니다.\n"변환파일 로컬 저장" 또는 "G-Notebook 자동 업로드" 중 최소 하나를켜주세요.', { type: 'warning', title: '경고' });
         return;
     }
 
@@ -146,6 +306,7 @@ async function startConversion() {
         UI.btnStart.disabled = true;
         UI.btnStart.style.opacity = '0.5';
     }
+    setInteractionDisabled(true);
 
     let notebookUrl = '', notebookId = '', authUser = '0', session = null;
     
@@ -154,6 +315,7 @@ async function startConversion() {
         if (!notebookUrl) {
             await message('G-Notebook URL을 입력해주세요.', { type: 'warning' });
             if (UI.btnStart) { UI.btnStart.disabled = false; UI.btnStart.style.opacity = '1'; }
+            setInteractionDisabled(false);
             return;
         }
         if (!notebookUrl.startsWith('http://') && !notebookUrl.startsWith('https://')) {
@@ -164,6 +326,7 @@ async function startConversion() {
         if (!notebookIdMatch) {
             await message('URL에서 노트북 ID를 찾을 수 없습니다.', { type: 'error' });
             if (UI.btnStart) { UI.btnStart.disabled = false; UI.btnStart.style.opacity = '1'; }
+            setInteractionDisabled(false);
             return;
         }
         notebookId = notebookIdMatch[1];
@@ -191,11 +354,11 @@ async function startConversion() {
             await message(`구글 로그인 실패로 작업이 중단되었습니다.\n(${authError.message})`, { type: 'warning' });
             if (UI.statusTextTotal) UI.statusTextTotal.innerText = "로그인 실패로 취소됨";
             if (UI.btnStart) { UI.btnStart.disabled = false; UI.btnStart.style.opacity = '1'; }
+            setInteractionDisabled(false);
             return;
         }
     }
 
-    const currentMode = UI.getModeSelection();
     const optimize = document.querySelector('input[name="convertMode"]:checked')?.value === 'B';
     const includeSub = UI.chkIncludeSub.checked;
     const openFolder = UI.chkOpenFolder.checked;
@@ -262,11 +425,23 @@ async function startConversion() {
 
             if (currentMode === "PDF") {
                 pdfUploadFiles = result.pdf_paths || convertedPdfFiles;
+                state.selectedFiles.forEach(f => {
+                    const p = typeof f === 'object' ? f.path : f;
+                    const ext = (p.split('.').pop() || '').toLowerCase();
+                    if (ext === 'pdf') pdfUploadFiles.push(p);
+                });
             } else if (currentMode === "MD") {
                 mdUploadFiles = result.md_paths || convertedMdFiles;
             } else {
                 pdfUploadFiles = result.pdf_paths || convertedPdfFiles;
                 mdUploadFiles = result.md_paths || convertedMdFiles;
+                
+                // DUAL(통합) 모드: 입력 파일 중 이미 PDF였던 원본 문서도 PDF 업로드 큐에 포함!
+                state.selectedFiles.forEach(f => {
+                    const p = typeof f === 'object' ? f.path : f;
+                    const ext = (p.split('.').pop() || '').toLowerCase();
+                    if (ext === 'pdf') pdfUploadFiles.push(p);
+                });
             }
 
             mdUploadFiles = Array.from(new Set(mdUploadFiles.filter(f => Boolean(f))));
@@ -293,7 +468,15 @@ async function startConversion() {
 
                     if (UI.progressFill) UI.progressFill.style.width = '100%';
                     if (UI.statusTextTotal) UI.statusTextTotal.innerText = "업로드 완료";
-                    await message(totalSummary.trim(), { type: 'info' });
+                    
+                    let finalUploadMsg = totalSummary.trim();
+                    if (currentMode === "DUAL" && nonHwpCount > 0) {
+                        finalUploadMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 MD로만 변환되었습니다.`;
+                    } else if (currentMode === "PDF" && nonHwpCount > 0) {
+                        finalUploadMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 변환 대상에서 제외되었습니다.`;
+                    }
+                    await message(finalUploadMsg, { type: 'info', title: '업로드 완료' });
+                    clearFiles();
                 } catch(uploadErr) {
                     if (UI.statusTextTotal) UI.statusTextTotal.innerText = "업로드 실패";
                     const prevMsg = totalSummary ? `(이전 성공 결과)\n${totalSummary}\n\n` : '';
@@ -305,7 +488,15 @@ async function startConversion() {
         } else {
             if (UI.progressFill) UI.progressFill.style.width = '100%';
             if (UI.statusTextTotal) UI.statusTextTotal.innerText = "준비 완료";
-            await message('변환 및 로컬 저장이 완료되었습니다.', { type: 'info' });
+            
+            let localCompleteMsg = '변환 및 로컬 저장이 완료되었습니다.';
+            if (currentMode === "DUAL" && nonHwpCount > 0) {
+                localCompleteMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 MD로만 변환되었습니다.`;
+            } else if (currentMode === "PDF" && nonHwpCount > 0) {
+                localCompleteMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 변환 대상에서 제외되었습니다.`;
+            }
+            await message(localCompleteMsg, { type: 'info', title: '변환 완료' });
+            clearFiles();
         }
     } catch (e) {
         if (UI.statusTextTotal) UI.statusTextTotal.innerText = "오류 발생";
@@ -320,6 +511,7 @@ async function startConversion() {
         }
         if (UI.statusTextDetail) UI.statusTextDetail.innerText = "";
         try { await invoke('cleanup_temp_files'); } catch(e) {}
+        setInteractionDisabled(false);
         if (UI.btnStart) {
             UI.btnStart.disabled = false;
             UI.btnStart.style.opacity = '1';
@@ -327,7 +519,7 @@ async function startConversion() {
     }
 }
 
-const CURRENT_VERSION = 'v1.1.0';
+const CURRENT_VERSION = 'v1.1.2';
 
 function compareVersions(v1, v2) {
     const clean1 = (v1 || '').replace(/^v/i, '').split('.').map(Number);
@@ -390,6 +582,8 @@ function initApp() {
     if (UI.btnFile) UI.btnFile.addEventListener('click', selectFiles);
     if (UI.btnFolder) UI.btnFolder.addEventListener('click', selectFolder);
     if (UI.btnStart) UI.btnStart.addEventListener('click', startConversion);
+    if (UI.btnToggleAccumulate) UI.btnToggleAccumulate.addEventListener('click', toggleAccumulateMode);
+    if (UI.btnClearFiles) UI.btnClearFiles.addEventListener('click', clearFiles);
     if (UI.chkUpload) UI.chkUpload.addEventListener('change', toggleNotebookLMUpload);
 
     const savedUrl = localStorage.getItem('dual_notebooklm_url');
@@ -401,6 +595,27 @@ function initApp() {
             localStorage.setItem('dual_notebooklm_url', e.target.value.trim());
         });
     }
+
+    async function handlePasteEvent(e) {
+        if (e && e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+            return;
+        }
+        try {
+            const files = await invoke('get_clipboard_files');
+            if (files && files.length > 0) {
+                await handleDroppedPaths(files);
+            }
+        } catch (err) {
+            console.log('클립보드 파일 읽기 실패:', err);
+        }
+    }
+
+    window.addEventListener('paste', handlePasteEvent);
+    window.addEventListener('keydown', async (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+            await handlePasteEvent(e);
+        }
+    });
 
     function toggleMdModeSection() {
         const selectMode = document.getElementById('select-convert-mode');
@@ -459,8 +674,7 @@ function initApp() {
 
     async function handleDroppedPaths(paths) {
         if (!paths || paths.length === 0) return;
-        let expandedFiles = [];
-        let hasFolder = false;
+        let filesToAdd = [];
         const includeSub = UI.chkIncludeSub ? UI.chkIncludeSub.checked : false;
         
         for (const path of (Array.isArray(paths) ? paths : [paths])) {
@@ -469,16 +683,15 @@ function initApp() {
                     folderPath: path,
                     includeSub: includeSub
                 });
-                expandedFiles.push(...files.map(f => ({ path: f, rootPath: path })));
-                hasFolder = true;
+                if (files && files.length > 0) {
+                    filesToAdd.push(...files.map(f => ({ path: f, rootPath: path })));
+                }
             } catch (e) {
-                expandedFiles.push({ path: path, rootPath: "" });
+                filesToAdd.push({ path: path, rootPath: "" });
             }
         }
         
-        state.selectedFiles = expandedFiles;
-        state.selectionMode = hasFolder ? 'folder' : 'file';
-        updateSelectedFilesUI();
+        appendFiles(filesToAdd);
     }
 
     listen('tauri://drag-drop', async (event) => {
