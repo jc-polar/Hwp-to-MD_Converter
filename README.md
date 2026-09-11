@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🚀 Hwp-to-MD Converter v1.1.2 (한글 문서 변환기)</h1>
+  <h1>🚀 Hwp-to-MD Converter v1.1.3 (한글 문서 변환기)</h1>
   <p><strong>HWP / HWPX 문서를 안전하게 마크다운(MD) 및 PDF로 변환하는 로컬 데스크톱 앱</strong></p>
   <p><em>(Tauri v2 + C# OLE Automation + Node.js Cheerio RAG Engine)</em></p>
 </div>
@@ -32,8 +32,6 @@
 - **🤖 목적에 따른 두 가지 MD 변환 모드**:
   - `G-Notebook 최적화`: 구글 AI 서비스인 Gemini Notebook(구 NotebookLM)이 내용을 이해할 수 있도록 표를 평탄화하고 텍스트를 정제합니다.
   - `기본 모드`: 후처리를 거치지 않고 KORDOC 엔진의 순수 원본 마크다운을 보존합니다.
-- **📊 2D Grid 표 수치 보존 & Rowspan 승계**:
-  - 수치/예산 등 다차원 표는 2D Grid 표(`|---|`) 구조로 보존하고, 세로 병합 셀 하위 행에 상위 값을 자동 복제하여 데이터 누락을 방지합니다.
 
 ---
 
@@ -133,12 +131,12 @@ npm run build:portable
 
 ---
 
-### Step 5. 최종 배포 패키지 구성 (`Hwp-to-MD_Converter_v1.1.2`)
+### Step 5. 최종 배포 패키지 구성 (`Hwp-to-MD_Converter_v1.1.3`)
 
 배포 시에는 불필요한 `node_modules` 없이 아래 핵심 파일만 모아서 배포합니다.
 
 ```
-(실행기) Hwp-to-MD_Converter_v1.1.2/
+(실행기) Hwp-to-MD_Converter_v1.1.3/
 ├── Hwp-to-MD_Converter.exe     ── Tauri v2 Rust 데스크톱 포터블 앱
 └── core/
     ├── node.exe                  ── 순정 Node.js 실행 엔진

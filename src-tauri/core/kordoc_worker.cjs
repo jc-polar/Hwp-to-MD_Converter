@@ -1,11 +1,49 @@
-// /kordoc-engine/kordoc_worker.js
-// Node.js 사이드카 스크립트: kordoc 엔진을 통한 문서 파싱 및 범용 원본 보존 후처리 담당
-
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { parse } = require('kordoc'); 
 const cheerio = require('cheerio');
+const AdmZip = require('adm-zip');
+
+// 1x1 투명 PNG 더미 버퍼 (이미지 위치/XML 관계는 100% 보존하면서 BinData 용량을 극적으로 다이어트)
+const DUMMY_PNG_BUFFER = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    'base64'
+);
+
+/**
+ * 대용량 HWPX/Office ZIP 문서의 미디어(BinData 등)를 1x1 초경량 더미 PNG로 인메모리 치환하여
+ * kordoc의 비압축 크기 제한(256MB) 초과를 방지하고 초고속으로 파싱할 수 있도록 가상 슬림 버퍼를 생성합니다.
+ */
+function createSlimDocBuffer(filePath) {
+    try {
+        if (!fs.existsSync(filePath)) return null;
+        const fileBuf = fs.readFileSync(filePath);
+        // ZIP 매직 바이트 검사 (PK\x03\x04)
+        if (fileBuf.length < 4 || fileBuf[0] !== 0x50 || fileBuf[1] !== 0x4B || fileBuf[2] !== 0x03 || fileBuf[3] !== 0x04) {
+            return null;
+        }
+
+        const zip = new AdmZip(fileBuf);
+        const entries = zip.getEntries();
+        let hasMedia = false;
+
+        for (const entry of entries) {
+            if (entry.isDirectory) continue;
+            const name = entry.entryName.toLowerCase();
+            if (name.startsWith('bindata/') || name.startsWith('word/media/') || name.startsWith('xl/media/') || name.startsWith('ppt/media/')) {
+                if (entry.header.size > 100) {
+                    entry.setData(DUMMY_PNG_BUFFER);
+                    hasMedia = true;
+                }
+            }
+        }
+
+        return hasMedia ? zip.toBuffer() : fileBuf;
+    } catch (err) {
+        return null;
+    }
+}
 
 
 
@@ -411,12 +449,13 @@ async function processDocument(filePath, origFilePath, outputDir, isNotebookLMMo
     const fileName = path.basename(origFilePath || filePath);
     let baseStem = fileName.substring(0, fileName.lastIndexOf('.'));
     const mdName = baseStem + ".md";
+    const finalPath = path.join(outputDir, mdName);
 
     try {
-        const finalPath = path.join(outputDir, mdName);
-        
         // 1. kordoc을 이용한 문서 -> 마크다운 텍스트 파싱
-        let parsedResult = await parse(filePath);
+        // 대용량 이미지 포함 문서의 비압축 크기 초과 방지를 위해 슬림 버퍼 생성 후 전달
+        const slimBuffer = createSlimDocBuffer(filePath);
+        let parsedResult = await parse(slimBuffer || filePath);
         if (!parsedResult.success) {
             throw new Error(parsedResult.error || "파싱 실패");
         }
@@ -451,13 +490,10 @@ async function processDocument(filePath, origFilePath, outputDir, isNotebookLMMo
     } catch (error) {
         try {
             if (outputDir && fs.existsSync(outputDir)) {
-                const fileName = path.basename(filePath);
-                const destPath = path.join(outputDir, mdName);
-                fs.copyFileSync(filePath, destPath);
-                process.stdout.write(`RESULT|COPIED|${filePath}|${destPath}\n`);
-            } else {
-                process.stdout.write(`RESULT|ERROR|${filePath}|${error.message}\n`);
+                const errorMd = `> ⚠️ **[오류 안내] 문서 변환 실패**\n>\n> * **대상 파일:** \`${fileName}\`\n> * **오류 사유:** ${error.message || '알 수 없는 파싱 오류'}\n`;
+                fs.writeFileSync(finalPath, errorMd, 'utf-8');
             }
+            process.stdout.write(`RESULT|ERROR|${filePath}|${error.message}\n`);
         } catch (copyErr) {
             process.stdout.write(`RESULT|ERROR|${filePath}|${error.message}\n`);
         }
