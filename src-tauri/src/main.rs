@@ -182,10 +182,18 @@ struct FileRequest {
     root_path: String,
 }
 
+#[derive(serde::Serialize, Clone)]
+pub struct FailedFileInfo {
+    pub path: String,
+    pub reason: String,
+    pub stage: String,
+}
+
 #[derive(serde::Serialize)]
 struct ConversionResult {
     pdf_paths: Vec<String>,
     md_paths: Vec<String>,
+    failed_files: Vec<FailedFileInfo>,
 }
 
 #[command]
@@ -197,7 +205,7 @@ async fn process_dual_documents(
     optimize: bool,
     local_save: bool,
     include_sub: bool,
-    open_folder: bool
+    skip_sanitization: bool
 ) -> Result<ConversionResult, String> {
     let mut expanded_files = Vec::new();
     let mut unsupported_files = Vec::new();
@@ -231,6 +239,7 @@ async fn process_dual_documents(
         return Ok(ConversionResult {
             pdf_paths: result_pdf_paths,
             md_paths: result_md_paths,
+            failed_files: Vec::new(),
         });
     }
 
@@ -312,16 +321,29 @@ async fn process_dual_documents(
 
     let clean_hwp_map_mutex = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::<String, String>::new()));
 
+    let mut result_failed_files: Vec<FailedFileInfo> = Vec::new();
+
     if !hwp_files.is_empty() {
         let pdf_exe = core_dir.join("pdf_worker.exe");
         if pdf_exe.exists() {
-            const CONCURRENCY: usize = 3;
-            let chunk_size = (hwp_files.len() + CONCURRENCY - 1) / CONCURRENCY;
+            // [적응형 동시성 제어 - Adaptive Concurrency]
+            // 50MB 이상 대용량 파일이 포함된 경우: 32비트 한컴 OLE 프로세스 간 가상 메모리(2GB) 및
+            // GDI/인쇄 드라이버 경합 충돌을 원천 방지하기 위해 1개 워커로 안전 직렬(Sequential) 처리
+            // 일반 크기 파일들로만 구성된 경우: 기존처럼 최대 3개 병렬 워커로 초고속 동시 처리
+            let has_large_file = hwp_files.iter().any(|req| {
+                std::fs::metadata(&req.path)
+                    .map(|m| m.len() >= 50 * 1024 * 1024)
+                    .unwrap_or(false)
+            });
+
+            let concurrency: usize = if has_large_file { 1 } else { 3 };
+            let chunk_size = (hwp_files.len() + concurrency - 1) / concurrency;
             let chunks: Vec<Vec<FileRequest>> = hwp_files.chunks(chunk_size).map(|c| c.to_vec()).collect();
 
             let mut handles = Vec::new();
             let pdf_paths_mutex = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let local_pids_mutex = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let failed_files_mutex = std::sync::Arc::new(std::sync::Mutex::new(Vec::<FailedFileInfo>::new()));
 
             for chunk in chunks {
                 let pdf_exe_path = pdf_exe.clone();
@@ -331,6 +353,7 @@ async fn process_dual_documents(
                 let pdf_paths_clone = pdf_paths_mutex.clone();
                 let clean_hwp_map_clone = clean_hwp_map_mutex.clone();
                 let local_pids_clone = local_pids_mutex.clone();
+                let failed_files_clone = failed_files_mutex.clone();
 
                 let handle = std::thread::spawn(move || {
                     let mut cmd = Command::new(&pdf_exe_path);
@@ -367,7 +390,7 @@ async fn process_dual_documents(
 
                                     let clean_hwp_path = clean_dir.join(format!("{}_clean.hwpx", stem)).to_string_lossy().to_string();
 
-                                    let line = format!("{}|{}|{}\n", req.path, pdf_path, clean_hwp_path);
+                                    let line = format!("{}|{}|{}|{}\n", req.path, pdf_path, clean_hwp_path, if skip_sanitization { "1" } else { "0" });
                                     let _ = stdin.write_all(line.as_bytes());
                                     let _ = stdin.flush();
                                 }
@@ -398,6 +421,19 @@ async fn process_dual_documents(
                                                 }
                                             }
                                         }
+                                    } else if line.starts_with("RESULT|ERROR|") {
+                                        let parts: Vec<&str> = line.split('|').collect();
+                                        if parts.len() >= 3 {
+                                            let orig_f = parts[2].trim().to_string();
+                                            let reason = if parts.len() >= 4 { parts[3].trim().to_string() } else { "PDF 변환 실패".to_string() };
+                                            if let Ok(mut failed) = failed_files_clone.lock() {
+                                                failed.push(FailedFileInfo {
+                                                    path: orig_f,
+                                                    reason,
+                                                    stage: "PDF".to_string(),
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -423,6 +459,13 @@ async fn process_dual_documents(
             if let Ok(paths_guard) = paths_lock {
                 for p in paths_guard.iter() {
                     result_pdf_paths.push(p.clone());
+                }
+            }
+
+            let failed_lock = failed_files_mutex.lock();
+            if let Ok(failed_guard) = failed_lock {
+                for f in failed_guard.iter() {
+                    result_failed_files.push(f.clone());
                 }
             }
         }
@@ -507,6 +550,17 @@ async fn process_dual_documents(
                                     result_md_paths.push(md_path.clone());
                                     let _ = app.emit("md-converted", md_path);
                                 }
+                            } else if line.starts_with("RESULT|ERROR|") {
+                                let parts: Vec<&str> = line.split('|').collect();
+                                if parts.len() >= 3 {
+                                    let orig_f = parts[2].trim().to_string();
+                                    let reason = if parts.len() >= 4 { parts[3].trim().to_string() } else { "마크다운 변환 실패".to_string() };
+                                    result_failed_files.push(FailedFileInfo {
+                                        path: orig_f,
+                                        reason,
+                                        stage: "MD".to_string(),
+                                    });
+                                }
                             }
                         }
                     }
@@ -526,16 +580,10 @@ async fn process_dual_documents(
         let _ = fs::remove_dir_all(&temp_base);
     }
 
-    if open_folder && local_save && output_dir.exists() {
-        #[cfg(target_os = "windows")]
-        {
-            let _ = Command::new("explorer").arg(&output_dir).spawn();
-        }
-    }
-
     Ok(ConversionResult {
         pdf_paths: result_pdf_paths,
         md_paths: result_md_paths,
+        failed_files: result_failed_files,
     })
 }
 

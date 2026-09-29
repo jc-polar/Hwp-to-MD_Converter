@@ -123,11 +123,11 @@ export async function getNotebookLMTokens(url) {
     });
 }
 
-export async function uploadSingleFileToNotebookLM(path, session, notebookId, authUser) {
-    return uploadMultipleFilesToNotebookLM([path], session, notebookId, authUser);
+export async function uploadSingleFileToNotebookLM(path, session, notebookId, authUser, onProgress) {
+    return uploadMultipleFilesToNotebookLM([path], session, notebookId, authUser, onProgress);
 }
 
-export async function uploadMultipleFilesToNotebookLM(paths, session, notebookId, authUser) {
+export async function uploadMultipleFilesToNotebookLM(paths, session, notebookId, authUser, onProgress) {
     if (!paths || paths.length === 0) return;
     const { tokens, label: webviewLabel } = session;
     // reset hash before injection
@@ -137,37 +137,72 @@ export async function uploadMultipleFilesToNotebookLM(paths, session, notebookId
     await invoke('eval_in_webview', { label: webviewLabel, script: 'window.__UPLOAD_CONFIG = ' + baseConfig + ';' });
 
     // Read and push files one by one to avoid IPC payload limits and V8 string limits
-    for (const path of paths) {
+    for (let fIdx = 0; fIdx < paths.length; fIdx++) {
+        const path = paths[fIdx];
         const fileName = path.split(/[\\/]/).pop();
         const fileDataBase64 = await invoke('read_file_base64', { path: path });
         
         const fileObjStr = JSON.stringify({ fileName, fileDataBase64 }).replace(/[\u007f-\uffff]/g, c => '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4));
         await invoke('eval_in_webview', { label: webviewLabel, script: `window.__UPLOAD_CONFIG.files.push(${fileObjStr});` });
+        if (onProgress && paths.length > 20 && (fIdx % 10 === 0 || fIdx === paths.length - 1)) {
+            onProgress(0, paths.length, `전송 준비 중 (${fIdx + 1}/${paths.length})...`);
+        }
     }
     await invoke('eval_in_webview', { label: webviewLabel, script: uploadScriptTemplate });
     
-    let success = false;
-    for (let i = 0; i < 600; i++) {
+    let lastActivityTime = Date.now();
+    let lastReportedDone = 0;
+    const IDLE_TIMEOUT_MS = 60000; // 60초 동안 구글 서버/웹뷰 응답이나 진행이 전혀 없을 때만 타임아웃
+    const MAX_TOTAL_TIME_MS = Math.max(1800000, paths.length * 60000); // 파일 개수에 비례하는 넉넉한 전체 제한 (최소 30분)
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < MAX_TOTAL_TIME_MS) {
         await new Promise(r => setTimeout(r, 300));
-        await invoke('eval_in_webview', { 
-            label: webviewLabel, 
-            script: "if (window.__UPLOAD_ERROR) window.location.hash = '#ERROR:' + encodeURIComponent(window.__UPLOAD_ERROR); else if (window.__UPLOAD_SUCCESS) window.location.hash = '#SUCCESS:' + encodeURIComponent(window.__UPLOAD_SUMMARY || 'ok');" 
-        });
+        
+        try {
+            await invoke('eval_in_webview', { 
+                label: webviewLabel, 
+                script: "if (window.__UPLOAD_ERROR) window.location.hash = '#ERROR:' + encodeURIComponent(window.__UPLOAD_ERROR); else if (window.__UPLOAD_SUCCESS) window.location.hash = '#SUCCESS:' + encodeURIComponent(window.__UPLOAD_SUMMARY || 'ok'); else if (window.__UPLOAD_PROGRESS) { var p = window.__UPLOAD_PROGRESS; var act = window.__UPLOAD_LAST_ACTIVITY || Date.now(); window.location.hash = '#PROGRESS:' + p.done + ':' + p.total + ':' + act + ':' + encodeURIComponent(p.currentFile || ''); }" 
+            });
+        } catch(e) {
+            throw new Error(`웹뷰 통신 실패 또는 브라우저 종료 (${e})`);
+        }
+
         const currentUrl = await invoke('get_webview_url', { label: webviewLabel });
         if (currentUrl.includes('#SUCCESS:')) {
-            success = true;
             const summary = decodeURIComponent(currentUrl.split('#SUCCESS:')[1] || '');
             await invoke('eval_in_webview', { label: webviewLabel, script: "window.location.hash = ''; window.__UPLOAD_SUCCESS = false;" });
             return summary;
         } else if (currentUrl.includes('#SUCCESS')) {
-            success = true;
             await invoke('eval_in_webview', { label: webviewLabel, script: "window.location.hash = ''; window.__UPLOAD_SUCCESS = false;" });
-            break;
+            return "업로드 완료";
         } else if (currentUrl.includes('#ERROR:')) {
             throw new Error(decodeURIComponent(currentUrl.split('#ERROR:')[1]));
+        } else if (currentUrl.includes('#PROGRESS:')) {
+            const progressData = currentUrl.split('#PROGRESS:')[1];
+            const parts = progressData.split(':');
+            const done = parseInt(parts[0], 10) || 0;
+            const total = parseInt(parts[1], 10) || paths.length;
+            const remoteLastAct = parseInt(parts[2], 10) || 0;
+            const curFile = decodeURIComponent(parts.slice(3).join(':') || '');
+            
+            if (done > lastReportedDone || remoteLastAct > lastActivityTime) {
+                lastActivityTime = Math.max(Date.now(), remoteLastAct);
+                lastReportedDone = done;
+            }
+            
+            if (onProgress) {
+                onProgress(done, total, curFile);
+            }
+        }
+
+        // 60초 이상 아무런 활동이나 진행이 없으면 Idle Timeout 발생
+        if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
+            throw new Error(`업로드 중단 (60초 동안 구글 서버 응답 없음 - ${lastReportedDone}/${paths.length}개 완료 시점)`);
         }
     }
-    if (!success) throw new Error(`upload timeout (${paths.length} files)`);
+
+    throw new Error(`업로드 전체 제한시간 초과 (${paths.length}개 파일, ${Math.round(MAX_TOTAL_TIME_MS / 60000)}분 경과)`);
 }
 
 export async function cleanupNotebookLMSession(session) {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Hwp-to-MD_Converter v1.1.3</title>
+    <title>Hwp-to-MD_Converter v1.1.4</title>
     <link rel="stylesheet" href="/src/styles.css">
 </head>
 <body>
@@ -28,7 +28,7 @@
 
             <header class="header">
                 <div class="title-container">
-                    <h1 class="title">Hwp-to-MD_Converter <span style="font-size: 14px; font-weight: 700; color: #3b82f6; -webkit-text-fill-color: #3b82f6; vertical-align: middle;">v1.1.3</span></h1>
+                    <h1 class="title">Hwp-to-MD_Converter <span style="font-size: 14px; font-weight: 700; color: #3b82f6; -webkit-text-fill-color: #3b82f6; vertical-align: middle;">v1.1.4</span></h1>
                 </div>
             </header>
 
@@ -101,10 +101,10 @@
                         <span class="slider blue"></span>
                         <span class="label-text">하위 폴더 포함</span>
                     </label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="chk-open-folder">
-                        <span class="slider green"></span>
-                        <span class="label-text">완료 후 폴더 열기</span>
+                    <label class="toggle-switch" title="0pt 폰트, 투명 텍스트, 제어문자 소거 등 7대 보안 멸균을 생략하여 변환 속도를 극대화합니다 (기본 문서 구조 정규화는 유지).">
+                        <input type="checkbox" id="chk-skip-sanitization">
+                        <span class="slider orange"></span>
+                        <span class="label-text">보안 전처리 생략</span>
                     </label>
                     <label class="toggle-switch">
                         <input type="checkbox" id="chk-local-save">

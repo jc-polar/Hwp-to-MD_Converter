@@ -62,6 +62,13 @@ export const uploadScriptTemplate = `
         // 페이지가 완전히 로드되고 SPA 네비게이션이 끝날 때까지 2초 대기
         await new Promise(r => setTimeout(r, 2000));
         
+        window.__UPLOAD_LAST_ACTIVITY = Date.now();
+        window.__UPLOAD_PROGRESS = {
+            done: 0,
+            total: files.length,
+            currentFile: '노트북 기존 문서 확인 중...'
+        };
+        
         window.__UPLOAD_STEP = '1_rLM1Ne';
         const reqId0 = Math.floor(Math.random() * 900000) + 100000;
         const rLM1NePayload = [[["rLM1Ne", JSON.stringify([notebookId, null, [2, null, null, [1, null, null, null, null, null, null, null, null, null, [1]]], null, 1, [[null, null, []]]]), null, "generic"]]];
@@ -108,6 +115,7 @@ export const uploadScriptTemplate = `
         async function processFile(file, retriesCount) {
             const fileName = file.fileName;
             const fileData = base64ToUint8Array(file.fileDataBase64);
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             
             window.__UPLOAD_STEP = '2_DeleteOld_' + fileName;
             if (existingFiles[fileName]) {
@@ -123,9 +131,11 @@ export const uploadScriptTemplate = `
                     headers: { 'content-type': 'application/x-www-form-urlencoded;charset=utf-8', 'x-same-domain': '1' },
                     body: delForm
                 }, retriesCount);
+                window.__UPLOAD_LAST_ACTIVITY = Date.now();
             }
 
             window.__UPLOAD_STEP = '3_o4cbdc_' + fileName;
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             const reqId1 = Math.floor(Math.random() * 900000) + 100000;
             const initPayload = [[["o4cbdc", JSON.stringify([[[fileName]], notebookId, [2], [1, null, null, null, null, null, null, null, null, null, [1]]]), null, "generic"]]];
             const formData = new URLSearchParams();
@@ -141,6 +151,7 @@ export const uploadScriptTemplate = `
                 },
                 body: formData
             }, retriesCount);
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             
             if (!rpcResp.ok) {
                 const errText = await rpcResp.text();
@@ -179,6 +190,7 @@ export const uploadScriptTemplate = `
             if (!fileId) throw new Error('fileId 발급 실패 | ' + rpcText);
             
             window.__UPLOAD_STEP = '4_UploadStart_' + fileName;
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             const startResp = await safeFetch('/upload/_/?authuser=' + authUser, {
                 method: 'POST',
                 credentials: 'include',
@@ -191,6 +203,7 @@ export const uploadScriptTemplate = `
                 },
                 body: JSON.stringify({ "PROJECT_ID": notebookId, "SOURCE_NAME": fileName, "SOURCE_ID": fileId })
             }, retriesCount);
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             if (!startResp.ok) {
                 const errText = await startResp.text().catch(e => '');
                 throw new Error('Start 에러: ' + startResp.status + ' | ' + errText);
@@ -199,6 +212,7 @@ export const uploadScriptTemplate = `
             const uploadId = startResp.headers.get('x-guploader-uploadid');
             if (!uploadId) throw new Error('uploadId 없음');
             window.__UPLOAD_STEP = '5_UploadFinalize_' + fileName;
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             const finalResp = await safeFetch('/upload/_/?authuser=' + authUser + '&upload_id=' + uploadId + '&upload_protocol=resumable', {
                 method: 'POST',
                 credentials: 'include',
@@ -209,6 +223,7 @@ export const uploadScriptTemplate = `
                 },
                 body: fileData
             }, retriesCount);
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             
             if (!finalResp.ok) {
                 const errText = await finalResp.text().catch(e => '');
@@ -223,15 +238,28 @@ export const uploadScriptTemplate = `
         const failedQueue2 = [];
         let index1 = 0;
         
+        function updateProgress(curFile) {
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
+            const doneCount = results.filter(r => r.success).length;
+            window.__UPLOAD_PROGRESS = {
+                done: doneCount,
+                total: files.length,
+                currentFile: curFile || ''
+            };
+        }
+        
         async function workerPass1() {
             while (index1 < files.length) {
                 const i = index1++;
                 const file = files[i];
                 try {
+                    updateProgress(file.fileName);
                     await processFile(file, 1); // 1차 세트: 단 1회 시도
                     results.push({ fileName: file.fileName, success: true });
                 } catch (e) {
                     failedQueue1.push({ file, error: e.message });
+                } finally {
+                    updateProgress(file.fileName);
                 }
             }
         }
@@ -244,17 +272,22 @@ export const uploadScriptTemplate = `
         
         // 2차 세트: 3초 대기(서버 쿨다운) 후 1차 실패 파일들 단 1회 재시도
         if (failedQueue1.length > 0) {
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             await new Promise(r => setTimeout(r, 3000));
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             let index2 = 0;
             async function workerPass2() {
                 while (index2 < failedQueue1.length) {
                     const idx = index2++;
                     const { file, error: firstErr } = failedQueue1[idx];
                     try {
+                        updateProgress(file.fileName);
                         await processFile(file, 1); // 2차 세트: 단 1회 시도
                         results.push({ fileName: file.fileName, success: true });
                     } catch (e2) {
                         failedQueue2.push({ file, error: e2.message });
+                    } finally {
+                        updateProgress(file.fileName);
                     }
                 }
             }
@@ -267,17 +300,22 @@ export const uploadScriptTemplate = `
 
         // 3차 최종 세트: 다시 3초 대기 후 2차 실패 파일들 최종 1회 시도
         if (failedQueue2.length > 0) {
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             await new Promise(r => setTimeout(r, 3000));
+            window.__UPLOAD_LAST_ACTIVITY = Date.now();
             let index3 = 0;
             async function workerPass3() {
                 while (index3 < failedQueue2.length) {
                     const idx = index3++;
                     const { file, error: secondErr } = failedQueue2[idx];
                     try {
+                        updateProgress(file.fileName);
                         await processFile(file, 1); // 3차 최종 세트: 단 1회 시도
                         results.push({ fileName: file.fileName, success: true });
                     } catch (e3) {
                         results.push({ fileName: file.fileName, success: false, error: e3.message });
+                    } finally {
+                        updateProgress(file.fileName);
                     }
                 }
             }

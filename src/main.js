@@ -42,7 +42,7 @@ const UI = {
     chkLocalSave: null,
     chkUpload: null,
     chkIncludeSub: null,
-    chkOpenFolder: null,
+    chkSkipSanitization: null,
     notebookUrlSection: null,
     notebookUrl: null,
     statusTextTotal: null,
@@ -60,7 +60,7 @@ const UI = {
         this.chkLocalSave = document.getElementById('chk-local-save');
         this.chkUpload = document.getElementById('chk-upload');
         this.chkIncludeSub = document.getElementById('chk-include-sub');
-        this.chkOpenFolder = document.getElementById('chk-open-folder');
+        this.chkSkipSanitization = document.getElementById('chk-skip-sanitization');
         this.notebookUrlSection = document.getElementById('url-input-container');
         this.notebookUrl = document.getElementById('notebook-url');
         this.statusTextTotal = document.querySelector('.status-text-total');
@@ -187,6 +187,19 @@ function clearFiles() {
     state.selectedFiles = [];
     state.selectedFolder = '';
     state.selectionMode = '';
+    updateSelectedFilesUI();
+}
+
+function retainOnlyFailedFiles(failedPaths) {
+    if (!failedPaths || failedPaths.length === 0) {
+        clearFiles();
+        return;
+    }
+    const failedSet = new Set(failedPaths.map(p => (p || '').toLowerCase().replace(/\\/g, '/')));
+    state.selectedFiles = state.selectedFiles.filter(f => {
+        const p = (typeof f === 'object' ? f.path : f || '').toLowerCase().replace(/\\/g, '/');
+        return failedSet.has(p);
+    });
     updateSelectedFilesUI();
 }
 
@@ -360,8 +373,8 @@ async function startConversion() {
     }
 
     const optimize = document.querySelector('input[name="convertMode"]:checked')?.value === 'B';
-    const includeSub = UI.chkIncludeSub.checked;
-    const openFolder = UI.chkOpenFolder.checked;
+    const includeSub = UI.chkIncludeSub ? UI.chkIncludeSub.checked : false;
+    const skipSanitization = UI.chkSkipSanitization ? UI.chkSkipSanitization.checked : false;
 
     if (UI.progressFill) UI.progressFill.style.width = '0%';
     if (UI.statusTextTotal) UI.statusTextTotal.innerText = "[2단계] 로컬 문서 정제 및 변환 중...";
@@ -404,7 +417,7 @@ async function startConversion() {
             optimize: optimize,
             localSave: isLocalSave,
             includeSub: includeSub,
-            openFolder: openFolder
+            skipSanitization: skipSanitization
         });
 
         if (state.uploadModeEnabled && globalNotebookSession) {
@@ -455,30 +468,81 @@ async function startConversion() {
                 
                 try {
                     if (mdUploadFiles.length > 0) {
-                        if (UI.statusTextTotal) UI.statusTextTotal.innerText = `[3단계] G-Notebook MD 파일(${mdUploadFiles.length}개) 업로드 중...`;
-                        const summary = await uploadMultipleFilesToNotebookLM(mdUploadFiles, globalNotebookSession, notebookId, globalNotebookSession.authUser || authUser);
+                        const stepPrefix = pdfUploadFiles.length > 0 ? "[3단계] " : "";
+                        if (UI.statusTextTotal) UI.statusTextTotal.innerText = `${stepPrefix}G-Notebook MD 파일(${mdUploadFiles.length}개) 업로드 중...`;
+                        const onMdProgress = (done, total, curFile) => {
+                            const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+                            if (UI.statusTextTotal) {
+                                UI.statusTextTotal.innerText = `${stepPrefix}G-Notebook MD 업로드 중... (${done}/${total}개, ${percent}%)`;
+                            }
+                            if (UI.statusTextDetail) {
+                                UI.statusTextDetail.innerText = curFile ? `현재 전송: ${curFile}` : '';
+                            }
+                            if (UI.progressFill) {
+                                UI.progressFill.style.width = `${percent}%`;
+                            }
+                        };
+                        const summary = await uploadMultipleFilesToNotebookLM(mdUploadFiles, globalNotebookSession, notebookId, globalNotebookSession.authUser || authUser, onMdProgress);
                         totalSummary += "[MD] " + summary + "\n";
                     }
                     
                     if (pdfUploadFiles.length > 0) {
-                        if (UI.statusTextTotal) UI.statusTextTotal.innerText = `[4단계] G-Notebook PDF 파일(${pdfUploadFiles.length}개) 업로드 중...`;
-                        const summary = await uploadMultipleFilesToNotebookLM(pdfUploadFiles, globalNotebookSession, notebookId, globalNotebookSession.authUser || authUser);
+                        const stepPrefix = mdUploadFiles.length > 0 ? "[4단계] " : "";
+                        if (UI.statusTextTotal) UI.statusTextTotal.innerText = `${stepPrefix}G-Notebook PDF 파일(${pdfUploadFiles.length}개) 업로드 중...`;
+                        const onPdfProgress = (done, total, curFile) => {
+                            const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+                            if (UI.statusTextTotal) {
+                                UI.statusTextTotal.innerText = `${stepPrefix}G-Notebook PDF 업로드 중... (${done}/${total}개, ${percent}%)`;
+                            }
+                            if (UI.statusTextDetail) {
+                                UI.statusTextDetail.innerText = curFile ? `현재 전송: ${curFile}` : '';
+                            }
+                            if (UI.progressFill) {
+                                UI.progressFill.style.width = `${percent}%`;
+                            }
+                        };
+                        const summary = await uploadMultipleFilesToNotebookLM(pdfUploadFiles, globalNotebookSession, notebookId, globalNotebookSession.authUser || authUser, onPdfProgress);
                         totalSummary += "[PDF] " + summary + "\n";
                     }
 
                     if (UI.progressFill) UI.progressFill.style.width = '100%';
-                    if (UI.statusTextTotal) UI.statusTextTotal.innerText = "업로드 완료";
+                    
+                    const failedFiles = result.failed_files || [];
+                    if (UI.statusTextTotal) {
+                        UI.statusTextTotal.innerText = failedFiles.length > 0 ? `업로드 완료 (${failedFiles.length}건 실패)` : "업로드 완료";
+                    }
+                    if (UI.statusTextDetail) UI.statusTextDetail.innerText = "";
                     
                     let finalUploadMsg = totalSummary.trim();
+                    let uploadPopupTitle = '업로드 완료';
+                    let uploadPopupType = 'info';
+
+                    if (failedFiles.length > 0) {
+                        uploadPopupTitle = `⚠️ 업로드 완료 (${failedFiles.length}건 변환 실패)`;
+                        uploadPopupType = 'warning';
+                        let failHeader = `⚠️ 전체 문서 중 ${failedFiles.length}건의 변환이 실패하였습니다.\n실패한 파일은 대기 목록에 그대로 보존되었습니다.\n\n[❌ 변환 실패 상세 (${failedFiles.length}건)]\n`;
+                        failedFiles.forEach((f, idx) => {
+                            const fname = (f.path || '').split(/[\\/]/).pop();
+                            failHeader += `${idx + 1}. [${f.stage}] ${fname} (${f.reason})\n`;
+                        });
+                        finalUploadMsg = failHeader + `\n[성공 업로드 결과]\n` + finalUploadMsg;
+                    }
+
                     if (currentMode === "DUAL" && nonHwpCount > 0) {
                         finalUploadMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 MD로만 변환되었습니다.`;
                     } else if (currentMode === "PDF" && nonHwpCount > 0) {
                         finalUploadMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 변환 대상에서 제외되었습니다.`;
                     }
-                    await message(finalUploadMsg, { type: 'info', title: '업로드 완료' });
-                    clearFiles();
+                    await message(finalUploadMsg, { type: uploadPopupType, title: uploadPopupTitle });
+                    
+                    if (failedFiles.length > 0) {
+                        retainOnlyFailedFiles(failedFiles.map(f => f.path));
+                    } else {
+                        clearFiles();
+                    }
                 } catch(uploadErr) {
                     if (UI.statusTextTotal) UI.statusTextTotal.innerText = "업로드 실패";
+                    if (UI.statusTextDetail) UI.statusTextDetail.innerText = "";
                     const prevMsg = totalSummary ? `(이전 성공 결과)\n${totalSummary}\n\n` : '';
                     const errorStr = (uploadErr && uploadErr.message) ? uploadErr.message : String(uploadErr);
                     await invoke('save_error_log', { content: `[G-Notebook Upload Error]\n${prevMsg}${errorStr}` }).catch(() => {});
@@ -487,16 +551,52 @@ async function startConversion() {
             }
         } else {
             if (UI.progressFill) UI.progressFill.style.width = '100%';
-            if (UI.statusTextTotal) UI.statusTextTotal.innerText = "준비 완료";
             
-            let localCompleteMsg = '변환 및 로컬 저장이 완료되었습니다.';
+            const failedFiles = result.failed_files || [];
+            let localCompleteMsg = '';
+            let popupTitle = '변환 완료';
+            let popupType = 'info';
+
+            if (failedFiles.length > 0) {
+                if (UI.statusTextTotal) UI.statusTextTotal.innerText = `변환 완료 (${failedFiles.length}건 실패)`;
+                popupTitle = `⚠️ 변환 완료 (${failedFiles.length}건 실패)`;
+                popupType = 'warning';
+
+                const mdSuccessCount = (result.md_paths || []).length;
+                const pdfSuccessCount = (result.pdf_paths || []).length;
+
+                localCompleteMsg = `⚠️ 전체 문서 중 ${failedFiles.length}건의 변환이 실패하였습니다.\n실패한 파일은 대기 목록에 그대로 보존되었습니다.\n`;
+                if (currentMode === "DUAL") {
+                    localCompleteMsg += `\n[성공 집계]\n• MD 변환 성공: ${mdSuccessCount}개\n• PDF 변환 성공: ${pdfSuccessCount}개\n`;
+                } else if (currentMode === "PDF") {
+                    localCompleteMsg += `\n[성공 집계]\n• PDF 변환 성공: ${pdfSuccessCount}개\n`;
+                } else {
+                    localCompleteMsg += `\n[성공 집계]\n• MD 변환 성공: ${mdSuccessCount}개\n`;
+                }
+
+                localCompleteMsg += `\n[❌ 변환 실패 상세 (${failedFiles.length}건)]\n`;
+                failedFiles.forEach((f, idx) => {
+                    const fname = (f.path || '').split(/[\\/]/).pop();
+                    localCompleteMsg += `${idx + 1}. [${f.stage}] ${fname}\n   └ 사유: ${f.reason}\n`;
+                });
+            } else {
+                if (UI.statusTextTotal) UI.statusTextTotal.innerText = "준비 완료";
+                localCompleteMsg = '변환 및 로컬 저장이 완료되었습니다.';
+            }
+
             if (currentMode === "DUAL" && nonHwpCount > 0) {
                 localCompleteMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 MD로만 변환되었습니다.`;
             } else if (currentMode === "PDF" && nonHwpCount > 0) {
                 localCompleteMsg += `\n\n💡 안내: PDF 변환은 한글(HWP/HWPX) 문서만 지원되어, 엑셀/워드/텍스트(${nonHwpCount}개)는 변환 대상에서 제외되었습니다.`;
             }
-            await message(localCompleteMsg, { type: 'info', title: '변환 완료' });
-            clearFiles();
+
+            await message(localCompleteMsg, { type: popupType, title: popupTitle });
+
+            if (failedFiles.length > 0) {
+                retainOnlyFailedFiles(failedFiles.map(f => f.path));
+            } else {
+                clearFiles();
+            }
         }
     } catch (e) {
         if (UI.statusTextTotal) UI.statusTextTotal.innerText = "오류 발생";
@@ -519,7 +619,7 @@ async function startConversion() {
     }
 }
 
-const CURRENT_VERSION = 'v1.1.3';
+const CURRENT_VERSION = 'v1.1.4';
 
 function compareVersions(v1, v2) {
     const clean1 = (v1 || '').replace(/^v/i, '').split('.').map(Number);

@@ -64,6 +64,17 @@ namespace HwpPdfWorker
                 catch { }
             }
         }
+        private static void CleanResetHwp(ref dynamic hwp)
+        {
+            if (hwp != null)
+            {
+                try { hwp.Quit(); } catch { }
+                try { Marshal.ReleaseComObject(hwp); } catch { }
+                hwp = null;
+            }
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
 
         private static dynamic EnsureHwpInstance(dynamic hwp)
         {
@@ -108,6 +119,8 @@ namespace HwpPdfWorker
 
                 var badCharPrIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+                bool hasOle = false;
+
                 // 1단계: header.xml을 읽어 7대 악성 숨김 조건(0pt, 흰색글자, 장평0% 등)에 해당하는 charPr ID 색출
                 using (var srcArchive = ZipFile.Open(sourceHwpx, ZipArchiveMode.Read))
                 {
@@ -117,7 +130,11 @@ namespace HwpPdfWorker
                         if (entry.FullName.EndsWith("header.xml", StringComparison.OrdinalIgnoreCase))
                         {
                             headerEntry = entry;
-                            break;
+                        }
+                        else if (entry.FullName.StartsWith("BinData/", StringComparison.OrdinalIgnoreCase) &&
+                                 entry.FullName.EndsWith(".ole", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasOle = true;
                         }
                     }
 
@@ -169,94 +186,106 @@ namespace HwpPdfWorker
                             }
                         }
                     }
+                } // srcArchive 닫음
 
+                // [Fast-Bypass] 악성 서식이 없고 OLE 충돌 개체도 없으면 무가공 고속 복사 (0.01초 소요)
+                if (badCharPrIds.Count == 0 && !hasOle)
+                {
                     if (File.Exists(targetHwpx))
                     {
                         try { File.Delete(targetHwpx); } catch { }
                     }
+                    File.Copy(sourceHwpx, targetHwpx, true);
+                    return true;
+                }
 
-                    // 2단계: 새 ZIP 파일로 스트리밍 복사하면서 section*.xml 정제 및 .ole 제거
-                    var zwcRegex = new Regex(@"[\u200B-\u200D\uFEFF\uFFFD]", RegexOptions.Compiled);
+                if (File.Exists(targetHwpx))
+                {
+                    try { File.Delete(targetHwpx); } catch { }
+                }
 
-                    using (var targetStream = new FileStream(targetHwpx, FileMode.Create, FileAccess.Write))
-                    using (var dstArchive = new ZipArchive(targetStream, ZipArchiveMode.Create))
+                // 2단계: 새 ZIP 파일로 스트리밍 복사하면서 section*.xml 정제 및 .ole 제거
+                // CompressionLevel.Fastest 적용으로 재압축 속도 극대화
+                var zwcRegex = new Regex(@"[\u200B-\u200D\uFEFF\uFFFD]", RegexOptions.Compiled);
+
+                using (var srcArchive = ZipFile.Open(sourceHwpx, ZipArchiveMode.Read))
+                using (var targetStream = new FileStream(targetHwpx, FileMode.Create, FileAccess.Write))
+                using (var dstArchive = new ZipArchive(targetStream, ZipArchiveMode.Create))
+                {
+                    foreach (var srcEntry in srcArchive.Entries)
                     {
-                        foreach (var srcEntry in srcArchive.Entries)
-                        {
-                            string entryName = srcEntry.FullName;
+                        string entryName = srcEntry.FullName;
 
-                            // OLE 충돌 개체 제거: BinData/*.ole 복사 배제
-                            if (entryName.StartsWith("BinData/", StringComparison.OrdinalIgnoreCase) &&
-                                entryName.EndsWith(".ole", StringComparison.OrdinalIgnoreCase))
+                        // OLE 충돌 개체 제거: BinData/*.ole 복사 배제
+                        if (entryName.StartsWith("BinData/", StringComparison.OrdinalIgnoreCase) &&
+                            entryName.EndsWith(".ole", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        // section*.xml 멸균 처리
+                        bool isSection = entryName.IndexOf("section", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                         entryName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+
+                        if (isSection)
+                        {
+                            string xmlContent;
+                            using (var inStream = srcEntry.Open())
+                            using (var sr = new StreamReader(inStream, Encoding.UTF8))
                             {
-                                continue;
+                                xmlContent = sr.ReadToEnd();
                             }
 
-                            // section*.xml 멸균 처리
-                            bool isSection = entryName.IndexOf("section", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                                             entryName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+                            // 2-1) ZWC 제어문자 소거
+                            xmlContent = zwcRegex.Replace(xmlContent, "");
 
-                            if (isSection)
+                            // 2-2) 악성 charPr 참조 <hp:run> 내부 텍스트 소거 (badCharPrIds가 있을 때만 DOM 파싱 수행)
+                            if (badCharPrIds.Count > 0)
                             {
-                                string xmlContent;
-                                using (var inStream = srcEntry.Open())
-                                using (var sr = new StreamReader(inStream, Encoding.UTF8))
+                                try
                                 {
-                                    xmlContent = sr.ReadToEnd();
-                                }
-
-                                // 2-1) ZWC 제어문자 소거
-                                xmlContent = zwcRegex.Replace(xmlContent, "");
-
-                                // 2-2) 악성 charPr 참조 <hp:run> 내부 텍스트 소거
-                                if (badCharPrIds.Count > 0)
-                                {
-                                    try
+                                    var xdoc = XDocument.Parse(xmlContent);
+                                    foreach (var run in xdoc.Descendants())
                                     {
-                                        var xdoc = XDocument.Parse(xmlContent);
-                                        foreach (var run in xdoc.Descendants())
+                                        if (run.Name.LocalName == "run")
                                         {
-                                            if (run.Name.LocalName == "run")
+                                            var attr = run.Attribute("charPrIDRef");
+                                            if (attr != null && badCharPrIds.Contains(attr.Value))
                                             {
-                                                var attr = run.Attribute("charPrIDRef");
-                                                if (attr != null && badCharPrIds.Contains(attr.Value))
+                                                foreach (var t in run.Descendants())
                                                 {
-                                                    // run 구조는 유지하되 내부 텍스트 태그(t)의 내용을 공백화하여 멸균
-                                                    foreach (var t in run.Descendants())
+                                                    if (t.Name.LocalName == "t")
                                                     {
-                                                        if (t.Name.LocalName == "t")
-                                                        {
-                                                            t.Value = "";
-                                                        }
+                                                        t.Value = "";
                                                     }
                                                 }
                                             }
                                         }
-                                        xmlContent = xdoc.ToString(SaveOptions.DisableFormatting);
                                     }
-                                    catch { }
+                                    xmlContent = xdoc.ToString(SaveOptions.DisableFormatting);
                                 }
-
-                                byte[] xmlBytes = Encoding.UTF8.GetBytes(xmlContent);
-                                var dstEntry = dstArchive.CreateEntry(entryName, CompressionLevel.Optimal);
-                                dstEntry.LastWriteTime = srcEntry.LastWriteTime;
-                                using (var outStream = dstEntry.Open())
-                                {
-                                    outStream.Write(xmlBytes, 0, xmlBytes.Length);
-                                }
+                                catch { }
                             }
-                            else
-                            {
-                                // 일반 엔트리 고속 바이너리 스트리밍 복사
-                                var dstEntry = dstArchive.CreateEntry(entryName,
-                                    srcEntry.CompressedLength == 0 ? CompressionLevel.NoCompression : CompressionLevel.Optimal);
-                                dstEntry.LastWriteTime = srcEntry.LastWriteTime;
 
-                                using (var inStream = srcEntry.Open())
-                                using (var outStream = dstEntry.Open())
-                                {
-                                    inStream.CopyTo(outStream);
-                                }
+                            byte[] xmlBytes = Encoding.UTF8.GetBytes(xmlContent);
+                            var dstEntry = dstArchive.CreateEntry(entryName, CompressionLevel.Fastest);
+                            dstEntry.LastWriteTime = srcEntry.LastWriteTime;
+                            using (var outStream = dstEntry.Open())
+                            {
+                                outStream.Write(xmlBytes, 0, xmlBytes.Length);
+                            }
+                        }
+                        else
+                        {
+                            // 일반 엔트리 고속 바이너리 스트리밍 복사 (Fastest 적용)
+                            var dstEntry = dstArchive.CreateEntry(entryName,
+                                srcEntry.CompressedLength == 0 ? CompressionLevel.NoCompression : CompressionLevel.Fastest);
+                            dstEntry.LastWriteTime = srcEntry.LastWriteTime;
+
+                            using (var inStream = srcEntry.Open())
+                            using (var outStream = dstEntry.Open())
+                            {
+                                inStream.CopyTo(outStream);
                             }
                         }
                     }
@@ -297,77 +326,122 @@ namespace HwpPdfWorker
                     string pdfPath = parts.Length >= 2 ? parts[1].Trim() : "";
                     string cleanPath = parts.Length >= 3 ? parts[2].Trim() : "";
 
-                    try
+                    // 4번째 인자로 보안 전처리 생략 플래그 수신 (기본값: false)
+                    bool skipSanitization = false;
+                    if (parts.Length >= 4)
                     {
-                        hwp = EnsureHwpInstance(hwp);
+                        string s = parts[3].Trim();
+                        skipSanitization = (s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase));
+                    }
 
-                        // 기존 잔존 0KB 또는 이전 작업 PDF 사전 삭제
-                        if (!string.IsNullOrEmpty(pdfPath) && File.Exists(pdfPath))
-                        {
-                            try { File.Delete(pdfPath); } catch { }
-                        }
+                    // 파일 크기 판정 (30MB 이상은 32비트 2GB 힙 한계선에 근접하는 대용량 문서)
+                    long fileSizeBytes = 0;
+                    try { fileSizeBytes = new FileInfo(inputPath).Length; } catch { }
+                    bool isLargeFile = fileSizeBytes >= 30 * 1024 * 1024;
 
-                        bool opened = false;
-                        try { opened = hwp.Open(inputPath, "", "forceopen:true"); } catch { }
-                        if (!opened)
-                        {
-                            Console.WriteLine(string.Format("RESULT|ERROR|{0}|파일 열기 실패", inputPath));
-                            continue;
-                        }
+                    string lastError = "";
 
-                        // 변경 추적 수락 및 모든 메모/주석 삭제 (시각적 오염 방지)
-                        try { hwp.HAction.Run("AcceptTrackChangeAll"); } catch { }
-                        try { hwp.HAction.Run("EraseAllMemo"); } catch { }
-                        try { hwp.HAction.Run("DeleteAllMemo"); } catch { }
-
-                        // 1단계: 원본 문서를 HWPX로 우선 덤프 (OLE 렌더링이 없어 100% 충돌 없이 초고속 저장)
-                        string rawHwpx = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "_raw.hwpx");
+                    // 최대 2회 시도: 1차 실패 시 한글 OLE 완전 종료 후 인스턴스 재생성하여 1회 자동 재시도
+                    for (int attempt = 1; attempt <= 2; attempt++)
+                    {
                         try
                         {
-                            hwp.HAction.GetDefault("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
-                            hwp.HParameterSet.HFileOpenSave.filename = rawHwpx;
-                            hwp.HParameterSet.HFileOpenSave.Format = "HWPX";
-                            hwp.HAction.Execute("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
-                        }
-                        catch { }
-                        finally
-                        {
-                            try { hwp.HAction.Run("FileClose"); } catch { }
-                        }
-
-                        // 2단계: 초고속 HWPX XML 직접 전수 멸균 파이프라인 (0.1~0.5초 소요)
-                        // 7대 숨김/프롬프트 인젝션 텍스트 소거 + ZWC 소거 + OLE 충돌 개체 제거
-                        string finalCleanHwpx = cleanPath;
-                        bool isTempCleanHwpx = false;
-                        if (string.IsNullOrEmpty(finalCleanHwpx))
-                        {
-                            finalCleanHwpx = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "_clean.hwpx");
-                            isTempCleanHwpx = true;
-                        }
-
-                        bool sanitized = false;
-                        if (File.Exists(rawHwpx))
-                        {
-                            sanitized = SanitizeHwpxPackage(rawHwpx, finalCleanHwpx);
-                            try { File.Delete(rawHwpx); } catch { }
-                        }
-
-                        string loadTarget = (sanitized && File.Exists(finalCleanHwpx)) ? finalCleanHwpx : inputPath;
-
-                        // 3단계: 100% 멸균된 클린 HWPX로부터 초고속 무결점 PDF 생성
-                        bool pdfSuccess = false;
-                        if (!string.IsNullOrEmpty(pdfPath))
-                        {
-                            hwp = EnsureHwpInstance(hwp);
-                            bool cleanOpened = false;
-                            try { cleanOpened = hwp.Open(loadTarget, "", "forceopen:true"); } catch { }
-                            if (cleanOpened)
+                            // 기존 잔존 0KB 또는 이전 작업 PDF 사전 삭제
+                            if (!string.IsNullOrEmpty(pdfPath) && File.Exists(pdfPath))
                             {
+                                try { File.Delete(pdfPath); } catch { }
+                            }
+
+                            // =========================================================================
+                            // [경로 A] 보안 전처리 생략 (skipSanitization == true) : 원패스(One-Pass) 초고속 직행
+                            // =========================================================================
+                            if (skipSanitization)
+                            {
+                                hwp = EnsureHwpInstance(hwp);
+                                bool opened = false;
+                                try { opened = hwp.Open(inputPath, "", "lock:false;forceopen:true;versionwarning:false"); } catch { }
+                                if (!opened)
+                                {
+                                    lastError = "파일 열기 실패";
+                                    throw new Exception(lastError);
+                                }
+
+                                // 1) 문서 구조 정규화 (변경추적 수락 및 메모 삭제는 필수 수행)
+                                try { hwp.HAction.Run("AcceptTrackChangeAll"); } catch { }
+                                try { hwp.HAction.Run("EraseAllMemo"); } catch { }
+                                try { hwp.HAction.Run("DeleteAllMemo"); } catch { }
+
+                                // 2) PDF 즉시 저장 (HWPX 재오픈 없이 열려있는 상태에서 바로 덤프)
+                                if (!string.IsNullOrEmpty(pdfPath))
+                                {
+                                    try
+                                    {
+                                        hwp.HAction.GetDefault("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
+                                        hwp.HParameterSet.HFileOpenSave.filename = pdfPath;
+                                        hwp.HParameterSet.HFileOpenSave.Format = "PDF";
+                                        hwp.HAction.Execute("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
+                                    }
+                                    catch { }
+
+                                    if (!File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
+                                    {
+                                        lastError = "PDF 변환 실패 (0KB 또는 렌더링 충돌)";
+                                        throw new Exception(lastError);
+                                    }
+                                }
+
+                                // 3) KORDOC 마크다운용 HWPX 즉시 저장
+                                if (!string.IsNullOrEmpty(cleanPath))
+                                {
+                                    try
+                                    {
+                                        if (File.Exists(cleanPath)) try { File.Delete(cleanPath); } catch { }
+                                        hwp.HAction.GetDefault("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
+                                        hwp.HParameterSet.HFileOpenSave.filename = cleanPath;
+                                        hwp.HParameterSet.HFileOpenSave.Format = "HWPX";
+                                        hwp.HAction.Execute("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
+                                    }
+                                    catch { }
+                                }
+
+                                try { hwp.HAction.Run("FileClose"); } catch { }
+
+                                // 대용량 파일 처리 후에는 다음 파일을 위해 클린 리셋
+                                if (isLargeFile)
+                                {
+                                    CleanResetHwp(ref hwp);
+                                }
+
+                                Console.WriteLine(string.Format("RESULT|SUCCESS|{0}|{1}|{2}", inputPath, pdfPath, cleanPath));
+                                break; // 성공 시 루프 탈출
+                            }
+
+                            // =========================================================================
+                            // [경로 B] 기본 안전 모드 (skipSanitization == false) : 7대 멸균 HWPX -> PDF 생성
+                            // =========================================================================
+                            else
+                            {
+                                hwp = EnsureHwpInstance(hwp);
+                                bool opened = false;
+                                try { opened = hwp.Open(inputPath, "", "lock:false;forceopen:true;versionwarning:false"); } catch { }
+                                if (!opened)
+                                {
+                                    lastError = "파일 열기 실패";
+                                    throw new Exception(lastError);
+                                }
+
+                                // 1) 문서 구조 정규화
+                                try { hwp.HAction.Run("AcceptTrackChangeAll"); } catch { }
+                                try { hwp.HAction.Run("EraseAllMemo"); } catch { }
+                                try { hwp.HAction.Run("DeleteAllMemo"); } catch { }
+
+                                // 2) 1단계: 원본 문서를 raw HWPX로 덤프
+                                string rawHwpx = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "_raw.hwpx");
                                 try
                                 {
                                     hwp.HAction.GetDefault("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
-                                    hwp.HParameterSet.HFileOpenSave.filename = pdfPath;
-                                    hwp.HParameterSet.HFileOpenSave.Format = "PDF";
+                                    hwp.HParameterSet.HFileOpenSave.filename = rawHwpx;
+                                    hwp.HParameterSet.HFileOpenSave.Format = "HWPX";
                                     hwp.HAction.Execute("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
                                 }
                                 catch { }
@@ -376,34 +450,99 @@ namespace HwpPdfWorker
                                     try { hwp.HAction.Run("FileClose"); } catch { }
                                 }
 
-                                if (File.Exists(pdfPath) && new FileInfo(pdfPath).Length > 0)
+                                // 3) 2단계: 7대 보안 멸균 실행 (Fast-Bypass + Fastest 압축)
+                                string finalCleanHwpx = cleanPath;
+                                bool isTempCleanHwpx = false;
+                                if (string.IsNullOrEmpty(finalCleanHwpx))
                                 {
-                                    pdfSuccess = true;
+                                    finalCleanHwpx = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + "_clean.hwpx");
+                                    isTempCleanHwpx = true;
                                 }
+
+                                bool sanitized = false;
+                                if (File.Exists(rawHwpx))
+                                {
+                                    sanitized = SanitizeHwpxPackage(rawHwpx, finalCleanHwpx);
+                                    try { File.Delete(rawHwpx); } catch { }
+                                }
+
+                                string loadTarget = (sanitized && File.Exists(finalCleanHwpx)) ? finalCleanHwpx : inputPath;
+
+                                // 4) 3단계: 100% 멸균된 클린 HWPX로부터 무결점 PDF 생성
+                                if (!string.IsNullOrEmpty(pdfPath))
+                                {
+                                    // [핵심] 대용량 문서이거나 이전 덤프로 힙이 오염된 경우 선제적 클린 리셋 실행
+                                    if (isLargeFile)
+                                    {
+                                        CleanResetHwp(ref hwp);
+                                    }
+
+                                    hwp = EnsureHwpInstance(hwp);
+                                    bool cleanOpened = false;
+                                    try { cleanOpened = hwp.Open(loadTarget, "", "lock:false;forceopen:true;versionwarning:false"); } catch { }
+
+                                    // [방어적 구제] 혹시라도 메모리 부족으로 Open 실패 시 즉시 클린 리셋 후 1회 재시도
+                                    if (!cleanOpened)
+                                    {
+                                        CleanResetHwp(ref hwp);
+                                        hwp = EnsureHwpInstance(hwp);
+                                        try { cleanOpened = hwp.Open(loadTarget, "", "lock:false;forceopen:true;versionwarning:false"); } catch { }
+                                    }
+
+                                    if (cleanOpened)
+                                    {
+                                        try
+                                        {
+                                            hwp.HAction.GetDefault("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
+                                            hwp.HParameterSet.HFileOpenSave.filename = pdfPath;
+                                            hwp.HParameterSet.HFileOpenSave.Format = "PDF";
+                                            hwp.HAction.Execute("FileSaveAs_S", hwp.HParameterSet.HFileOpenSave.HSet);
+                                        }
+                                        catch { }
+                                        finally
+                                        {
+                                            try { hwp.HAction.Run("FileClose"); } catch { }
+                                        }
+                                    }
+
+                                    if (!File.Exists(pdfPath) || new FileInfo(pdfPath).Length == 0)
+                                    {
+                                        lastError = "PDF 변환 실패 (0KB 또는 렌더링 충돌)";
+                                        throw new Exception(lastError);
+                                    }
+                                }
+
+                                if (isTempCleanHwpx && File.Exists(finalCleanHwpx))
+                                {
+                                    try { File.Delete(finalCleanHwpx); } catch { }
+                                }
+
+                                // 대용량 파일 작업 완료 후 다음 파일 처리를 위해 클린 리셋
+                                if (isLargeFile)
+                                {
+                                    CleanResetHwp(ref hwp);
+                                }
+
+                                Console.WriteLine(string.Format("RESULT|SUCCESS|{0}|{1}|{2}", inputPath, pdfPath, cleanPath));
+                                break; // 성공 시 루프 탈출
                             }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            pdfSuccess = true;
+                            lastError = ex.Message;
+                            if (attempt == 1)
+                            {
+                                // 1차 시도 실패 시: 한글 프로세스를 즉시 클린 리셋하고 0.5초 대기 후 1회 자동 재시도
+                                CleanResetHwp(ref hwp);
+                                Thread.Sleep(500);
+                            }
+                            else
+                            {
+                                // 2차 시도까지 최종 실패 시에도 다음 파일을 위해 프로세스를 클린 리셋
+                                CleanResetHwp(ref hwp);
+                                Console.WriteLine(string.Format("RESULT|ERROR|{0}|{1}", inputPath, lastError));
+                            }
                         }
-
-                        if (isTempCleanHwpx && File.Exists(finalCleanHwpx))
-                        {
-                            try { File.Delete(finalCleanHwpx); } catch { }
-                        }
-
-                        if (!string.IsNullOrEmpty(pdfPath) && !pdfSuccess)
-                        {
-                            Console.WriteLine(string.Format("RESULT|ERROR|{0}|PDF 변환 실패 (0KB 또는 렌더링 충돌)", inputPath));
-                        }
-                        else
-                        {
-                            Console.WriteLine(string.Format("RESULT|SUCCESS|{0}|{1}|{2}", inputPath, pdfPath, cleanPath));
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine(string.Format("RESULT|ERROR|{0}|{1}", inputPath, ex.Message));
                     }
                 }
             }
@@ -413,7 +552,7 @@ namespace HwpPdfWorker
             }
             finally
             {
-                if (hwp != null) try { hwp.Quit(); } catch { }
+                CleanResetHwp(ref hwp);
             }
         }
     }
